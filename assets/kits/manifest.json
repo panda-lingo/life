@@ -1,0 +1,117 @@
+// Asset manifest: data-driven description of pre-generated low-poly kits.
+// The AI composer only references ids from this file; the engine never
+// invents geometry. New kits/props = add rows here, then map in props.js.
+
+{
+  "kits": [
+    {
+      "id": "urban-cafe",
+      "label": "Urban Café",
+      "mood": "casual, bright",
+      "groundColor": 12682234,
+      "layouts": [
+        {
+          "id": "cafe-1",
+          "slots": [
+            { "name": "counter", "options": ["counter"] },
+            { "name": "tables", "options": ["table", "table", "table"] },
+            { "name": "chairs", "options": ["chair", "chair", "chair", "chair"] },
+            { "name": "plants", "options": ["plant"] },
+            { "name": "lamp", "options": ["lamp"] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "office",
+      "label": "Open Office",
+      "mood": "professional, neutral",
+      "groundColor": 11592726,
+      "layouts": [
+        {
+          "id": "office-1",
+          "slots": [
+            { "name": "desk", "options": ["desk"] },
+            { "name": "chairs", "options": ["meeting-chair", "meeting-chair", "meeting-chair"] },
+            { "name": "board", "options": ["whiteboard"] },
+            { "name": "shelf", "options": ["bookshelf"] },
+            { "name": "plant", "options": ["plant"] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "home-office",
+      "label": "Home Office",
+      "mood": "cozy, warm",
+      "groundColor": 9066054,
+      "layouts": [
+        {
+          "id": "home-1",
+          "slots": [
+            { "name": "desk", "options": ["desk"] },
+            { "name": "chair", "options": ["chair"] },
+            { "name": "sofa", "options": ["sofa"] },
+            { "name": "lamp", "options": ["lamp"] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "park",
+      "label": "City Park",
+      "mood": "open, outdoors",
+      "groundColor": 9728471,
+      "layouts": [
+        {
+          "id": "park-1",
+          "slots": [
+            { "name": "benches", "options": ["bench", "bench"] },
+            { "name": "plants", "options": ["plant", "plant", "plant"] },
+            { "name": "lamp", "options": ["lamp"] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "restaurant",
+      "label": "Restaurant",
+      "mood": "intimate, evening",
+      "groundColor": 8030847,
+      "layouts": [
+        {
+          "id": "restaurant-1",
+          "slots": [
+            { "name": "tables", "options": ["table", "table"] },
+            { "name": "chairs", "options": ["chair", "chair", "chair", "chair"] },
+            { "name": "lamp", "options": ["lamp", "lamp"] },
+            { "name": "plant", "options": ["plant"] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "apartment",
+      "label": "Studio Apartment",
+      "mood": "casual, day",
+      "groundColor": 12682234,
+      "layouts": [
+        {
+          "id": "apartment-1",
+          "slots": [
+            { "name": "sofa", "options": ["sofa"] },
+            { "name": "table", "options": ["table"] },
+            { "name": "chair", "options": ["chair"] },
+            { "name": "plant", "options": ["plant"] },
+            { "name": "lamp", "options": ["lamp"] }
+          ]
+        }
+      ]
+    }
+  ],
+  "lightingPresets": [
+    { "id": "day", "sunIntensity": 0.9, "dirIntensity": 0.6, "skyHex": 11863152 },
+    { "id": "evening", "sunIntensity": 0.4, "dirIntensity": 0.2, "skyHex": 3895386 },
+    { "id": "night", "sunIntensity": 0.18, "dirIntensity": 0.08, "skyHex": 1381914 }
+  ]
+}

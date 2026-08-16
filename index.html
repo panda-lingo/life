@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>LifeSpeak — Speak English. Live the life.</title>
+  <style>
+    html,body { margin:0; padding:0; height:100%; background:#1a1a22; overflow:hidden; font-family:system-ui,sans-serif; color:#fff; }
+    #stage { position:fixed; inset:0; }
+    .splash { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:12px; }
+    .splash button { padding:12px 18px; border-radius:10px; border:0; background:#6c8cff; color:#fff; font-size:16px; }
+  </style>
+</head>
+<body>
+  <div id="stage"></div>
+  <div class="splash" id="splash">
+    <h1>LifeSpeak</h1>
+    <p>Practice English by living it. Speak through real situations.</p>
+    <button id="start">Start</button>
+  </div>
+  <script type="module">
+    import { startGame } from './src/game/loop.js';
+    document.getElementById('start').onclick = async () => {
+      document.getElementById('splash').remove();
+      await startGame(document.getElementById('stage'));
+    };
+  </script>
+</body>
+</html>
