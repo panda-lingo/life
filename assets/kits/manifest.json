@@ -1,7 +1,3 @@
-// Asset manifest: data-driven description of pre-generated low-poly kits.
-// The AI composer only references ids from this file; the engine never
-// invents geometry. New kits/props = add rows here, then map in props.js.
-
 {
   "kits": [
     {
@@ -13,11 +9,21 @@
         {
           "id": "cafe-1",
           "slots": [
-            { "name": "counter", "options": ["counter"] },
-            { "name": "tables", "options": ["table", "table", "table"] },
-            { "name": "chairs", "options": ["chair", "chair", "chair", "chair"] },
-            { "name": "plants", "options": ["plant"] },
-            { "name": "lamp", "options": ["lamp"] }
+            { "name": "counter", "options": ["cafe-counter"] },
+            { "name": "seating", "options": ["cafe-table-round", "cafe-table-square"] },
+            { "name": "chairs", "options": ["chair-wood", "stool"] },
+            { "name": "greenery", "options": ["potted-plant", "hanging-plant"] },
+            { "name": "lighting", "options": ["cafe-pendant", "floor-lamp"] }
+          ]
+        },
+        {
+          "id": "cafe-2",
+          "slots": [
+            { "name": "counter", "options": ["cafe-counter"] },
+            { "name": "seating", "options": ["cafe-table-square", "bench"] },
+            { "name": "chairs", "options": ["stool", "chair-wood"] },
+            { "name": "greenery", "options": ["potted-plant"] },
+            { "name": "lighting", "options": ["floor-lamp"] }
           ]
         }
       ]
@@ -31,11 +37,11 @@
         {
           "id": "office-1",
           "slots": [
-            { "name": "desk", "options": ["desk"] },
-            { "name": "chairs", "options": ["meeting-chair", "meeting-chair", "meeting-chair"] },
-            { "name": "board", "options": ["whiteboard"] },
-            { "name": "shelf", "options": ["bookshelf"] },
-            { "name": "plant", "options": ["plant"] }
+            { "name": "workstation", "options": ["office-desk", "standing-desk"] },
+            { "name": "seating", "options": ["office-chair", "meeting-chair"] },
+            { "name": "board", "options": ["whiteboard", "projector-screen"] },
+            { "name": "storage", "options": ["bookshelf", "filing-cabinet"] },
+            { "name": "greenery", "options": ["potted-plant", "succulent"] }
           ]
         }
       ]
@@ -49,10 +55,11 @@
         {
           "id": "home-1",
           "slots": [
-            { "name": "desk", "options": ["desk"] },
-            { "name": "chair", "options": ["chair"] },
-            { "name": "sofa", "options": ["sofa"] },
-            { "name": "lamp", "options": ["lamp"] }
+            { "name": "workstation", "options": ["office-desk"] },
+            { "name": "seating", "options": ["office-chair", "armchair"] },
+            { "name": "relaxation", "options": ["sofa", "floor-cushion"] },
+            { "name": "lighting", "options": ["desk-lamp", "floor-lamp"] },
+            { "name": "greenery", "options": ["succulent", "potted-plant"] }
           ]
         }
       ]
@@ -66,9 +73,21 @@
         {
           "id": "park-1",
           "slots": [
-            { "name": "benches", "options": ["bench", "bench"] },
-            { "name": "plants", "options": ["plant", "plant", "plant"] },
-            { "name": "lamp", "options": ["lamp"] }
+            { "name": "seating", "options": ["park-bench", "picnic-table"] },
+            { "name": "trees", "options": ["tree-round", "tree-pine"] },
+            { "name": "path-lights", "options": ["street-lamp"] },
+            { "name": "feature", "options": ["fountain", "statue"] },
+            { "name": "amenity", "options": ["trashcan", "bike-rack"] }
+          ]
+        },
+        {
+          "id": "park-2",
+          "slots": [
+            { "name": "seating", "options": ["picnic-table", "park-bench"] },
+            { "name": "trees", "options": ["tree-pine", "tree-round"] },
+            { "name": "path-lights", "options": ["street-lamp"] },
+            { "name": "feature", "options": ["statue", "fountain"] },
+            { "name": "amenity", "options": ["bike-rack", "trashcan"] }
           ]
         }
       ]
@@ -82,10 +101,11 @@
         {
           "id": "restaurant-1",
           "slots": [
-            { "name": "tables", "options": ["table", "table"] },
-            { "name": "chairs", "options": ["chair", "chair", "chair", "chair"] },
-            { "name": "lamp", "options": ["lamp", "lamp"] },
-            { "name": "plant", "options": ["plant"] }
+            { "name": "table", "options": ["restaurant-table", "cafe-table-round"] },
+            { "name": "chairs", "options": ["dining-chair", "chair-wood"] },
+            { "name": "bar", "options": ["bar-counter"] },
+            { "name": "lighting", "options": ["candle", "cafe-pendant"] },
+            { "name": "greenery", "options": ["potted-plant", "hanging-plant"] }
           ]
         }
       ]
@@ -99,11 +119,11 @@
         {
           "id": "apartment-1",
           "slots": [
-            { "name": "sofa", "options": ["sofa"] },
-            { "name": "table", "options": ["table"] },
-            { "name": "chair", "options": ["chair"] },
-            { "name": "plant", "options": ["plant"] },
-            { "name": "lamp", "options": ["lamp"] }
+            { "name": "sleeping", "options": ["bed", "sofa-bed"] },
+            { "name": "lounge", "options": ["sofa", "armchair"] },
+            { "name": "dining", "options": ["cafe-table-square", "cafe-table-round"] },
+            { "name": "storage", "options": ["bookshelf", "wardrobe"] },
+            { "name": "lighting", "options": ["floor-lamp", "desk-lamp"] }
           ]
         }
       ]
