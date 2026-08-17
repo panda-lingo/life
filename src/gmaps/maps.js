@@ -64,6 +64,13 @@ function logPlaces(action, params) {
 }
 
 // ---------- config ---------------------------------------------------------
+// Key resolution order (declarative mapping, docs/architecture.md):
+//   1. backend GET /api/maps/config  — secrets live server-side
+//   2. window.__LIFESPEAK_GOOGLE_MAPS_CONFIG — explicit dev override
+//   3. GOOGLE_MAPS_API_KEY / GOOGLE_MAPS_MAP_ID env (Node/tests)
+//   4. mock mode
+import { backendMapsConfig } from '../net/backend.js';
+
 function envConfig() {
   const env = (typeof process !== 'undefined' ? process.env : {}) || {};
   return {
@@ -77,6 +84,29 @@ function runtimeConfig() {
 }
 export function effectiveMapsConfig() {
   return runtimeConfig() || envConfig();
+}
+
+// Backend-first: returns {apiKey, mapId?} or null. Memoized per page so the
+// explorer and any later consumer share one probe.
+let _backendMapsConfigPromise = null;
+// Dependency seam for tests: Node unit tests inject a stub here so the
+// resolution order can be asserted without a real network call.
+let _backendMapsConfigImpl = backendMapsConfig;
+export function resolveMapsConfig() {
+  _backendMapsConfigPromise ||= (async () => {
+    const fromBackend = await _backendMapsConfigImpl();
+    return fromBackend || effectiveMapsConfig() || null;
+  })();
+  return _backendMapsConfigPromise;
+}
+// Test hook: reset the memoized backend-config probe.
+export function _resetMapsConfig() {
+  _backendMapsConfigPromise = null;
+}
+// Test hook: inject a fake backend maps config fetcher.
+export function _setBackendMapsConfigImpl(impl) {
+  _backendMapsConfigImpl = impl;
+  _backendMapsConfigPromise = null;
 }
 
 // ---------- loader ---------------------------------------------------------
@@ -238,8 +268,8 @@ function placeToDetails(p) {
  * the mock. Never throws — failure surfaces as `mock: true`.
  */
 export async function createExplorer(container, opts = {}) {
-  const cfg = effectiveMapsConfig() || {};
-  const maps = await loadGoogleMaps(opts.apiKey);
+  const cfg = await resolveMapsConfig() || {};
+  const maps = await loadGoogleMaps(opts.apiKey || cfg.apiKey);
   if (!maps) {
     // Render a placeholder so the container isn't blank in mock mode; the
     // engine keeps owning the WebGL canvas underneath.

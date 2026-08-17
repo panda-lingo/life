@@ -1,6 +1,49 @@
 # Run — LifeSpeak
 
-## Desktop
+## Backend server (Docker / Node)
+
+The game container is a single Node process (`server/server.js`, zero npm
+dependencies) that serves the static game **and** the `/api/*` backend:
+
+```bash
+docker build -t lifespeak:local .
+docker run -d --rm -p 127.0.0.1:8080:8080 \
+  -e IMAGE_TEXT_API_FORMAT=openai \
+  -e IMAGE_TEXT_BASE_URL=https://your-gateway/v1 \
+  -e IMAGE_TEXT_MODEL=your-model \
+  -e IMAGE_TEXT_API_KEY=sk-... \
+  -e GOOGLE_MAPS_API_KEY=AIza... \
+  -v lifespeak-data:/app/data \
+  lifespeak:local
+# Open http://127.0.0.1:8080
+```
+
+Server environment variables (all optional — every unset feature degrades
+gracefully):
+
+| Variable | Purpose | When unset |
+|---|---|---|
+| `PORT` | listen port (default `8080`) | — |
+| `DATA_DIR` | where user event JSONL is persisted (default `<repo>/data`) | events still accepted, written under repo `data/` |
+| `IMAGE_TEXT_API_FORMAT` | `openai` (only supported format) | `POST /api/ai/complete` answers 503 → game uses mock/browser provider |
+| `IMAGE_TEXT_BASE_URL` / `IMAGE_TEXT_MODEL` / `IMAGE_TEXT_API_KEY` | OpenAI-compatible endpoint creds, **server-side only** | same 503 fallback |
+| `GOOGLE_MAPS_API_KEY` / `GOOGLE_MAPS_MAP_ID` | Maps bootstrap, handed to the page via `GET /api/maps/config` | 404 → explore mode runs deterministic mock |
+| `EVENTS_BODY_LIMIT` / `AI_BODY_LIMIT` | request size caps (defaults 256 KB / 1 MB) | — |
+
+Secrets never reach the page: the browser only ever talks to same-origin
+`/api/*`. The server logs every request and response (url, action, headers,
+body) as a curl command with auth headers masked (`sk-ab…wxyz`).
+
+Local dev without Docker:
+
+```bash
+node server/server.js        # serves the game + API on :8080
+```
+
+## Static hosting (no backend)
+
+Any static file server still works — the game detects the missing backend via
+`/api/healthz` and falls back to in-page providers and IndexedDB-only storage:
 
 ```bash
 npx serve .
@@ -19,14 +62,20 @@ The splash screen has a second entry: **Explore a real place**. Instead of the
 (cafés, restaurants, parks …), and builds a dialogue beat out of the place you
 pick — same scoring, debrief, and learner-model pipeline as classic mode.
 
-Configuration is read from `window.__LIFESPEAK_GOOGLE_MAPS_CONFIG` (set before
-the page script runs, e.g. via a small inline script in a local-only HTML page)
-or from `GOOGLE_MAPS_API_KEY` / `GOOGLE_MAPS_MAP_ID` env vars where a
-`process.env` exists. Both are optional — nothing needs configuring to play:
-- **No key** → deterministic *mock mode*: a canned center and three mock
+Maps configuration resolution order (first hit wins):
+
+1. **Backend** `GET /api/maps/config` — the key lives only on the server.
+2. `window.__LIFESPEAK_GOOGLE_MAPS_CONFIG` (set before the page script runs,
+   e.g. via a small inline script in a local-only HTML page) — dev override
+   when the backend is absent.
+3. `GOOGLE_MAPS_API_KEY` / `GOOGLE_MAPS_MAP_ID` env vars where a
+   `process.env` exists.
+
+All are optional — nothing needs configuring to play:
+- **No key anywhere** → deterministic *mock mode*: a canned center and three mock
   places (`The Central Perk Café` etc.) appear. This is the default for local
   dev and CI, and all e2e/integration coverage runs against it.
-- **Key set** → the Maps JS API loads with the Places library; geolocation
+- **Key found** → the Maps JS API loads with the Places library; geolocation
   permission is best-effort (denied → fallback center, Places search still
   runs). All Maps traffic goes through `src/gmaps/maps.js`, which logs every
   request/response (url, action, headers, body, masked-key curl
@@ -53,8 +102,10 @@ docker run -d --rm -p 127.0.0.1:8080:8080 lifespeak:local
 # Open http://127.0.0.1:8080
 ```
 
-The image is multi-arch (`linux/amd64`, `linux/arm64`) and runs as the
-non-root `nginx` user with a built-in healthcheck on `/`.
+The image is multi-arch (`linux/amd64`, `linux/arm64`), runs as the non-root
+`node` user, and has a built-in healthcheck on `/api/healthz`. Persist user
+data across container restarts by mounting a volume at `/app/data` (the
+default `DATA_DIR` inside the image).
 
 ## Controls
 

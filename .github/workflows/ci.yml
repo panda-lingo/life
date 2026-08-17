@@ -52,7 +52,7 @@ jobs:
         run: node -e 'JSON.parse(require("fs").readFileSync("assets/kits/manifest.json","utf8")); console.log("manifest.json OK")'
 
       - name: Run Node unit tests
-        run: node --test 'scenarios/**/*.test.mjs' 'src/data/**/*.test.mjs' 'src/ai/openaiProvider.test.mjs' 'src/speech/**/*.test.mjs' 'src/gmaps/**/*.test.mjs' 'src/game/**/*.test.mjs'
+        run: node --test 'scenarios/**/*.test.mjs' 'src/data/**/*.test.mjs' 'src/ai/openaiProvider.test.mjs' 'src/ai/director.test.mjs' 'src/net/**/*.test.mjs' 'src/speech/**/*.test.mjs' 'src/gmaps/**/*.test.mjs' 'src/game/**/*.test.mjs' 'server/**/*.test.mjs'
 
       - name: Static syntax check on browser modules
         run: |
@@ -60,7 +60,9 @@ jobs:
                    src/ai/director.js src/ai/provider.js src/ai/openaiProvider.js src/ai/mockProvider.js \
                    src/data/eventlog.js src/data/learnerModel.js src/data/analytics.js \
                    src/gmaps/maps.js \
+                   src/net/backend.js \
                    src/speech/speech.js src/ui/hud.js \
+                   server/server.js server/api.js server/config.js server/eventStore.js server/httpLog.js \
                    scenarios/scenarios.js; do
             node --check "$f"
           done
@@ -121,10 +123,26 @@ jobs:
         env:
           GAME_IMAGE_TAG: lifespeak-web:desktop-e2e
           GAME_PORT: 8080
+          IMAGE_TEXT_API_FORMAT: ${{ vars.IMAGE_TEXT_API_FORMAT }}
+          IMAGE_TEXT_BASE_URL: ${{ vars.IMAGE_TEXT_BASE_URL }}
+          IMAGE_TEXT_MODEL: ${{ vars.IMAGE_TEXT_MODEL }}
+          IMAGE_TEXT_API_KEY: ${{ secrets.IMAGE_TEXT_API_KEY }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          GOOGLE_MAPS_MAP_ID: ${{ vars.GOOGLE_MAPS_MAP_ID }}
         run: |
           set -euo pipefail
+          # Pass IMAGE_TEXT_* + GOOGLE_MAPS_* through so the server (not the
+          # browser) holds the secrets. When unset the server's /api/healthz
+          # reports ai/maps=false and the game falls back to deterministic
+          # mocks — that's what backend.spec.js exercises.
           docker run -d --rm --name lifespeak-e2e \
             -p 127.0.0.1:${GAME_PORT}:8080 \
+            -e IMAGE_TEXT_API_FORMAT \
+            -e IMAGE_TEXT_BASE_URL \
+            -e IMAGE_TEXT_MODEL \
+            -e IMAGE_TEXT_API_KEY \
+            -e GOOGLE_MAPS_API_KEY \
+            -e GOOGLE_MAPS_MAP_ID \
             "${GAME_IMAGE_TAG}"
           for i in $(seq 1 30); do
             if curl -fsS "http://127.0.0.1:${GAME_PORT}/" >/dev/null; then
@@ -135,6 +153,11 @@ jobs:
           done
           curl -fsS "http://127.0.0.1:${GAME_PORT}/" >/dev/null
           npx playwright test --project=desktop --workers=1
+          # Backend boundary suite (healthz / maps / events round-trip / page
+          # boots without secrets). Same backend, same container.
+          npx playwright test --project=desktop --workers=1 tests/backend.spec.js
+          # Real-AI smoke: requires IMAGE_TEXT_* secrets on the container
+          # (the job exports them via docker run -e below).
           npx playwright test --project=desktop --workers=1 tests/realai.spec.js
           docker stop lifespeak-e2e >/dev/null || true
 
@@ -189,10 +212,23 @@ jobs:
         run: ./scripts/ci-start-redroid.sh
 
       - name: Run game container (loopback-bound)
+        env:
+          IMAGE_TEXT_API_FORMAT: ${{ vars.IMAGE_TEXT_API_FORMAT }}
+          IMAGE_TEXT_BASE_URL: ${{ vars.IMAGE_TEXT_BASE_URL }}
+          IMAGE_TEXT_MODEL: ${{ vars.IMAGE_TEXT_MODEL }}
+          IMAGE_TEXT_API_KEY: ${{ secrets.IMAGE_TEXT_API_KEY }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          GOOGLE_MAPS_MAP_ID: ${{ vars.GOOGLE_MAPS_MAP_ID }}
         run: |
           docker run -d --rm --name lifespeak-mobile \
             --add-host host.docker.internal:host-gateway \
             -p 127.0.0.1:8080:8080 \
+            -e IMAGE_TEXT_API_FORMAT \
+            -e IMAGE_TEXT_BASE_URL \
+            -e IMAGE_TEXT_MODEL \
+            -e IMAGE_TEXT_API_KEY \
+            -e GOOGLE_MAPS_API_KEY \
+            -e GOOGLE_MAPS_MAP_ID \
             lifespeak-web:mobile-e2e
           for i in $(seq 1 30); do
             if curl -fsS "http://127.0.0.1:8080/" >/dev/null; then

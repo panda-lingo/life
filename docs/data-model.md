@@ -1,6 +1,12 @@
 # Data Model — LifeSpeak
 
-Everything the game records is an **append-only event** in IndexedDB (`lifespeak` DB, `events` store). Sessions are the unit of analysis; each session has a random UUID. Export is JSONL — one JSON object per line — which any offline tool (pandas, duckdb, jq, Excel) can ingest without a server.
+Everything the game records is an **append-only event**. The browser's
+IndexedDB (`lifespeak` DB, `events` store) is the write-through source of
+truth; when the backend server is reachable, every event is **mirrored
+server-side** (`POST /api/events`, batched, deduped by `id`) into JSONL files
+under the server's `DATA_DIR`. Sessions are the unit of analysis; each session
+has a random UUID. Both stores export JSONL — one JSON object per line — which
+any offline tool (pandas, duckdb, jq, Excel) can ingest.
 
 ## Event envelope
 
@@ -33,6 +39,13 @@ Everything the game records is an **append-only event** in IndexedDB (`lifespeak
 | `scenario.debrief` | scenario closes | `debrief {scores, evidence, nextTime}` |
 | `skill.updated` | learner model updates | `skill`, `newValue` |
 
+## Server-side persistence
+
+- `POST /api/events` accepts `{events: [...]}` batches (envelope shape above), deduped by event `id`, and appends them as JSONL to `DATA_DIR/events-YYYY-MM-DD.jsonl` (one file per UTC day).
+- `GET /api/events?session=<id>&type=<prefix>&since=<ms>` reads them back as `{events: [...]}` — same filters as the IndexedDB `queryEvents()`.
+- The browser mirror is asynchronous and offline-tolerant: `eventlog.emit()` writes IndexedDB first, then queues the event for the backend; failures retry with backoff and a `sendBeacon` flush runs on `pagehide`. When the backend is absent, the game behaves exactly as before (IndexedDB-only).
+- Ordering: within a session, `seq` (per-session monotonic) is authoritative on both stores; `ts` remains for cross-session timelines.
+
 ## Learner model (offline heuristics)
 
 - **Language dimensions** (`fluency`, `range`, `accuracy`, `interaction`): EMA with α=0.25, 0–5 scale anchored to CEFR.
@@ -44,10 +57,11 @@ This is deliberately simple and explainable — no server, no black box. A real 
 
 ## Storage & privacy
 
-- IndexedDB `events` store, indexes on `ts`, `sessionId`, `type`.
-- No PII beyond optional profile fields the player provides; no network required for analysis.
+- IndexedDB `events` store, indexes on `ts`, `sessionId`, `type` — the **source of truth** on the client.
+- **Backend mirror**: when the backend server is reachable (`/api/healthz`), every event is also POSTed to `/api/events` in small batches. Mirroring is async and never blocks gameplay; failures are queued in memory and retried with exponential backoff (5s → 60s cap), with a `sendBeacon` flush on `pagehide`. The server appends to per-day JSONL files under `DATA_DIR` (`events-YYYY-MM-DD.jsonl`) and dedupes by event `id` (within each batch and again at read time), so client retries never produce duplicate analysis rows. `GET /api/events?session=<id>` reads the server-side log back.
+- No PII beyond optional profile fields the player provides; analysis works offline from either the client export or the server JSONL files.
 - Export produces one `.jsonl` file; sample analysis notebook planned under `docs/`.
-- Data minimization: events capture *what* happened (scores, flags, transcripts) but never raw audio — audio stays on device and is discarded after STT.
+- Data minimization: events capture *what* happened (scores, flags, transcripts) but never raw audio — audio stays on device and is discarded after STT. The same event envelope crosses the wire; no additional fields are collected server-side.
 
 ## Offline analysis contract
 

@@ -146,3 +146,8 @@ vite.config.ts.timestamp-*
 /test-results/
 /playwright-report/
 /.playwright/
+
+# Runtime user data — server writes event JSONL here (and locally before the
+# backend exists). Never tracked; CI mounts a volume at /app/data inside the
+# container.
+/data/

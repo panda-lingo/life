@@ -1,11 +1,16 @@
 // AI provider boundary. The game talks ONLY to this module.
 // Contract (per project constraint): text + image in  ->  text out.
-// Default implementation is a deterministic offline mock so the whole game
-// runs with zero keys; plug a real provider by setting window.LIFESPEAK_AI
-// or editing provider.js.
+//
+// Provider order (first healthy wins):
+//   1. backend server provider  — POST /api/ai/complete; secrets live
+//      server-side. Skipped entirely when /api/healthz is unreachable.
+//   2. window.LIFESPEAK_AI      — explicit dev/test override.
+//   3. browser-direct OpenAI    — window.__LIFESPEAK_AI_CONFIG / env creds.
+//   4. mockProvider             — deterministic offline fallback.
 
 import { mockProvider } from './mockProvider.js';
 import detectOpenAIProvider from './openaiProvider.js';
+import { probeBackend, backendComplete } from '../net/backend.js';
 
 // director.js stays import-safe in browsers even when the openai SDK is
 // unavailable (no importmap entry), because detectOpenAIProvider() is
@@ -13,11 +18,35 @@ import detectOpenAIProvider from './openaiProvider.js';
 // call() so a synchronous module graph never blows up on page load.
 
 let _detectPromise = null;
+// Dependency seams so Node unit tests can inject fake providers without a
+// browser, fetch, or real backend. Production leaves them null → real imports.
+let _probeBackend = probeBackend;
+let _backendComplete = backendComplete;
+let _detectOpenAI = detectOpenAIProvider;
+let _mock = mockProvider;
+
+export function _setProviderImplsForTests(impls = {}) {
+  if ('probeBackend' in impls) _probeBackend = impls.probeBackend;
+  if ('backendComplete' in impls) _backendComplete = impls.backendComplete;
+  if ('detectOpenAI' in impls) _detectOpenAI = impls.detectOpenAI;
+  if ('mock' in impls) _mock = impls.mock;
+  _detectPromise = null;
+}
+
+export async function getProviderForTests() {
+  return getProvider();
+}
+
 async function getProvider() {
   if (typeof window !== 'undefined' && window.LIFESPEAK_AI) return window.LIFESPEAK_AI;
-  _detectPromise ||= detectOpenAIProvider();
+  // Prefer the backend: when it answers, secrets never enter the page.
+  const health = await _probeBackend();
+  if (health?.ai) {
+    return { name: 'backend', complete: (req) => _backendComplete(req) };
+  }
+  _detectPromise ||= _detectOpenAI();
   const real = await _detectPromise;
-  return real || mockProvider;
+  return real || _mock;
 }
 
 // ---- prompt assembly -------------------------------------------------

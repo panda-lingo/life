@@ -15,7 +15,10 @@ import {
   getDetails,
   placeToBeat,
   effectiveMapsConfig,
+  resolveMapsConfig,
   resetGoogleMapsLoaderForTests,
+  _resetMapsConfig,
+  _setBackendMapsConfigImpl,
   __test__,
 } from './maps.js';
 
@@ -105,4 +108,67 @@ test('placeToBeat: park kind maps to Staff role', () => {
   const beat = placeToBeat(park);
   assert.equal(beat.location, 'park');
   assert.equal(beat.npcs[0].role, 'Staff');
+});
+
+// ---------- resolveMapsConfig: backend-first order + memoization -------------
+test('resolveMapsConfig: returns backend config when present, ignoring env', async () => {
+  process.env.GOOGLE_MAPS_API_KEY = 'env-key';
+  _setBackendMapsConfigImpl(async () => ({ apiKey: 'backend-key', mapId: 'm' }));
+  const cfg = await resolveMapsConfig();
+  assert.equal(cfg.apiKey, 'backend-key');
+  assert.equal(cfg.mapId, 'm');
+  delete process.env.GOOGLE_MAPS_API_KEY;
+  _resetMapsConfig();
+  _setBackendMapsConfigImpl(null);
+});
+
+test('resolveMapsConfig: falls back to env config when backend is null', async () => {
+  _setBackendMapsConfigImpl(async () => null);
+  process.env.GOOGLE_MAPS_API_KEY = 'env-key';
+  const cfg = await resolveMapsConfig();
+  assert.equal(cfg.apiKey, 'env-key');
+  delete process.env.GOOGLE_MAPS_API_KEY;
+  _resetMapsConfig();
+  _setBackendMapsConfigImpl(null);
+});
+
+test('resolveMapsConfig: returns null when no source has a key (mock mode)', async () => {
+  _setBackendMapsConfigImpl(async () => null);
+  delete process.env.GOOGLE_MAPS_API_KEY;
+  delete process.env.GOOGLE_MAPS_KEY;
+  const cfg = await resolveMapsConfig();
+  // backend null + env empty + (Node: no window runtime) → mock mode.
+  // effectiveMapsConfig() returns an object with undefined fields when env
+  // is present-but-empty, so accept either null or a key-less object.
+  assert.ok(cfg === null || (cfg.apiKey === undefined && cfg.mapId === undefined),
+    `expected null or key-less config, got ${JSON.stringify(cfg)}`);
+  _resetMapsConfig();
+});
+
+test('resolveMapsConfig: memoizes so the backend impl runs exactly once', async () => {
+  let calls = 0;
+  _setBackendMapsConfigImpl(async () => {
+    calls += 1;
+    return { apiKey: 'k' };
+  });
+  await resolveMapsConfig();
+  await resolveMapsConfig();
+  await resolveMapsConfig();
+  assert.equal(calls, 1);
+  _resetMapsConfig();
+  _setBackendMapsConfigImpl(null);
+});
+
+test('_resetMapsConfig: forces the next call to probe again', async () => {
+  let calls = 0;
+  _setBackendMapsConfigImpl(async () => {
+    calls += 1;
+    return { apiKey: 'k' };
+  });
+  await resolveMapsConfig();
+  _resetMapsConfig();
+  await resolveMapsConfig();
+  assert.equal(calls, 2);
+  _resetMapsConfig();
+  _setBackendMapsConfigImpl(null);
 });

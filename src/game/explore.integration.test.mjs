@@ -10,6 +10,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+// ---------- skip the live backend probes in Node ------------------------
+// The dev box happens to have a docker-proxy listening on :8080 that
+// accepts TCP but never replies, which makes fetch() hang ~22s instead
+// of failing fast. Real CI (and the e2e suite) reach a real backend or
+// a refused port — both fail quickly. Here we short-circuit the probes
+// so the director + maps chains fall straight to their mock fallbacks.
+import { _setProviderImplsForTests } from '../ai/director.js';
+import { _setBackendMapsConfigImpl, _resetMapsConfig } from '../gmaps/maps.js';
+import { _setBackendImplForTests, _resetSyncForTests } from '../data/eventlog.js';
+_setProviderImplsForTests({
+  probeBackend: async () => null,
+  detectOpenAI: async () => null,
+  mock: { name: 'mock', complete: async () => '{}' },
+});
+_setBackendMapsConfigImpl(async () => null);
+_setBackendImplForTests({ probeBackend: async () => null, appendEvents: async () => ({ accepted: 0, deduped: 0, total: 0 }), beaconEvents: () => false });
+_resetMapsConfig();
+
 // ---------- minimal DOM shim ----------------------------------------------
 function makeEl(tag = 'div') {
   const el = {
@@ -147,12 +165,17 @@ test('explore mode: full flow from startExplore to debrief (mock maps)', async (
 
   // The place picker renders one button per place under #hud-place-picker.
   // Poll until the mock places render, then click the first (The Central
-  // Perk Café — deterministic mock data).
+  // Perk Café — deterministic mock data). Surfacing the HUD state on
+  // timeout makes a regression diagnosable instead of opaque.
   let picked = false;
   for (let i = 0; i < 500 && !picked; i++) {
     const btn = findInHud((c) => c.dataset?.placeId === 'mock-cafe-central');
     if (btn) { btn.onclick?.(); picked = true; break; }
     await new Promise((r) => setTimeout(r, 10));
+  }
+  if (!picked) {
+    const hud = globalThis.document.body.children.find((c) => c.id === 'hud');
+    console.log('HUD children at timeout:', hud?.children.map((c) => c.id || c.tagName).join(','));
   }
   assert.ok(picked, 'place picker never rendered the mock café');
 
