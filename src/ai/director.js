@@ -7,8 +7,17 @@
 import { mockProvider } from './mockProvider.js';
 import detectOpenAIProvider from './openaiProvider.js';
 
-function getProvider() {
-  return window.LIFESPEAK_AI || detectOpenAIProvider() || mockProvider;
+// director.js stays import-safe in browsers even when the openai SDK is
+// unavailable (no importmap entry), because detectOpenAIProvider() is
+// async and lazily loads the SDK. The provider selection happens inside
+// call() so a synchronous module graph never blows up on page load.
+
+let _detectPromise = null;
+async function getProvider() {
+  if (typeof window !== 'undefined' && window.LIFESPEAK_AI) return window.LIFESPEAK_AI;
+  _detectPromise ||= detectOpenAIProvider();
+  const real = await _detectPromise;
+  return real || mockProvider;
 }
 
 // ---- prompt assembly -------------------------------------------------
@@ -29,7 +38,7 @@ function jsonPrompt(system, task, context) {
 }
 
 async function call(system, task, context, { image = null } = {}) {
-  const p = getProvider();
+  const p = await getProvider();
   const raw = await p.complete({ prompt: jsonPrompt(system, task, context), image });
   return JSON.parse(extractJSON(raw));
 }

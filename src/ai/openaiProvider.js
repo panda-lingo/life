@@ -11,7 +11,64 @@
 // real provider; otherwise it falls back to mockProvider so the game still
 // runs offline / in CI without a key.
 
-import OpenAI from 'openai';
+let _OpenAI = null;
+let _OpenAILoadError = null;
+async function loadOpenAI() {
+  if (_OpenAI || _OpenAILoadError) return { OpenAI: _OpenAI, error: _OpenAILoadError };
+  try {
+    // In browsers, bare specifiers need an importmap. index.html does NOT
+    // include one for "openai" (and shouldn't — the SDK is a Node dev dep),
+    // so we attempt the import and gracefully degrade if it fails.
+    const mod = await import('openai');
+    _OpenAI = mod.default || mod;
+  } catch (e) {
+    _OpenAILoadError = e;
+  }
+  return { OpenAI: _OpenAI, error: _OpenAILoadError };
+}
+
+// ---------- request/response logging ------------------------------------
+// Logs every HTTP call the provider makes. Auth headers are masked.
+// Intended for debugging CI runs and local development; safe to enable by
+// default because it never prints secrets.
+
+function maskAuthHeaders(headers = {}) {
+  const masked = {};
+  for (const [k, v] of Object.entries(headers)) {
+    if (/authorization|api[-_]?key|x-api-key|proxy-authorization/i.test(k)) {
+      const s = String(v);
+      masked[k] = s.length > 8 ? `${s.slice(0, 6)}…${s.slice(-4)}` : '***';
+    } else {
+      masked[k] = v;
+    }
+  }
+  return masked;
+}
+
+function toCurl({ url, method = 'POST', headers = {}, body }) {
+  const parts = [`curl -X ${method} '${url}'`];
+  for (const [k, v] of Object.entries(maskAuthHeaders(headers))) {
+    parts.push(`-H '${k}: ${v}'`);
+  }
+  if (body !== undefined) {
+    const b = typeof body === 'string' ? body : JSON.stringify(body);
+    parts.push(`--data-raw '${b.replace(/'/g, "'\\''")}'`);
+  }
+  return parts.join(' \\\n  ');
+}
+
+function logRequest({ action, url, method = 'POST', headers = {}, body }) {
+  const line = `[ai:${action}] ${method} ${url}`;
+  console.log(line);
+  console.log(`  headers:`, maskAuthHeaders(headers));
+  if (body !== undefined) console.log(`  body:`, typeof body === 'string' ? body : JSON.stringify(body));
+  console.log(`  curl: ${toCurl({ url, method, headers, body })}`);
+}
+
+function logResponse({ action, status, body }) {
+  console.log(`[ai:${action}] response status=${status}`);
+  if (body !== undefined) console.log(`  body:`, typeof body === 'string' ? body : JSON.stringify(body));
+}
 
 function envConfig() {
   const fmt = (typeof process !== 'undefined' ? process.env : {}).IMAGE_TEXT_API_FORMAT;
@@ -42,13 +99,40 @@ function effectiveConfig() {
   return envConfig() || runtimeConfig();
 }
 
-export function openaiProvider({ apiKey, baseURL, model } = {}) {
+export async function openaiProvider({ apiKey, baseURL, model } = {}) {
   const cfg = effectiveConfig() || {};
   const key = apiKey || cfg.apiKey;
   const url = baseURL || cfg.baseURL;
   const mdl = model || cfg.model;
   if (!key) throw new Error('IMAGE_TEXT_API_KEY (or apiKey arg) required for openaiProvider');
-  const client = new OpenAI({ apiKey: key, baseURL: url || undefined });
+  const { OpenAI, error } = await loadOpenAI();
+  if (!OpenAI) {
+    throw new Error(
+      `openai SDK not available in this environment (${error?.message || 'module not found'}). ` +
+        'Use mockProvider, or add an importmap entry for "openai" to run in a browser.',
+    );
+  }
+  const baseUrlUsed = (url || 'https://api.openai.com/v1').replace(/\/$/, '');
+  const client = new OpenAI({
+    apiKey: key,
+    baseURL: url || undefined,
+    // The official SDK doesn't expose a request logger, so we wrap fetch
+    // ourselves to log every call as a curl command with auth masked.
+    fetch: async (input, init) => {
+      const u = typeof input === 'string' ? input : input.url;
+      const method = init?.method || 'GET';
+      const headers = init?.headers || {};
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      const action = u.replace(baseUrlUsed, '').replace(/^\//, '') || 'root';
+      logRequest({ action, url: u, method, headers, body });
+      const res = await fetch(input, init);
+      const cloned = res.clone();
+      let parsedBody;
+      try { parsedBody = await cloned.json(); } catch { parsedBody = await cloned.text(); }
+      logResponse({ action, status: res.status, body: parsedBody });
+      return res;
+    },
+  });
   const useModel = mdl || 'gpt-4o-mini';
 
   return {
@@ -83,8 +167,8 @@ export function openaiProvider({ apiKey, baseURL, model } = {}) {
 // Convenience: build a provider that's compatible with director.js's
 // `complete({ prompt, image }) -> string (JSON)` contract. The director
 // wraps the returned string in `JSON.parse(extractJSON(...))`.
-export function openaiAsDirector({ apiKey, baseURL, model } = {}) {
-  const inner = openaiProvider({ apiKey, baseURL, model });
+export async function openaiAsDirector({ apiKey, baseURL, model } = {}) {
+  const inner = await openaiProvider({ apiKey, baseURL, model });
   return {
     async complete(req) {
       // director.js assembles system + context JSON inside `prompt`; we
@@ -102,16 +186,23 @@ export function openaiAsDirector({ apiKey, baseURL, model } = {}) {
 export function createHttpProvider({ endpoint, apiKey, model }) {
   return {
     async complete({ prompt, image = null }) {
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      };
+      const body = { model, prompt, image };
+      logRequest({ action: 'legacy', url: endpoint, method: 'POST', headers, body });
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-        },
-        body: JSON.stringify({ model, prompt, image }),
+        headers,
+        body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(`AI provider ${res.status}: ${await res.text()}`);
-      const data = await res.json();
+      const text = await res.text();
+      let parsedBody;
+      try { parsedBody = JSON.parse(text); } catch { parsedBody = text; }
+      logResponse({ action: 'legacy', status: res.status, body: parsedBody });
+      if (!res.ok) throw new Error(`AI provider ${res.status}: ${text}`);
+      const data = parsedBody;
       return data.text;
     },
   };
@@ -119,15 +210,17 @@ export function createHttpProvider({ endpoint, apiKey, model }) {
 
 // Default export: provider selected from env, or null (so director.js
 // falls back to mockProvider). Callers can also `import { openaiProvider }`.
-export default function detectProvider() {
+export default async function detectProvider() {
   const cfg = effectiveConfig();
   if (!cfg) return null;
   try {
-    return openaiAsDirector({});
+    return await openaiAsDirector({});
   } catch (e) {
     // openai SDK not importable in this environment — return null so the
     // caller can decide what to do (game still works with the mock).
-    if (/Cannot find module|ERR_MODULE_NOT_FOUND/.test(String(e?.message || e))) return null;
+    if (/Cannot find module|ERR_MODULE_NOT_FOUND|not available in this environment/.test(String(e?.message || e))) {
+      return null;
+    }
     throw e;
   }
 }
