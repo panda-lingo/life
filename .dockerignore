@@ -1,0 +1,53 @@
+# Git
+.git
+.gitignore
+.github/
+
+# IDE
+.vscode
+.idea
+.claude/
+.codex/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+.dockerignore
+!docker/nginx.conf
+docker/**
+!docker/
+!docker/nginx.conf
+
+# Documentation (prompt templates live under docs/prompt if ever added)
+docs/
+*.md
+!README.md
+!docs/prompt/
+!docs/prompt/**
+
+# Tests and scripts
+tests/
+scripts/
+
+# Node / tooling
+node_modules/
+package.json
+package-lock.json
+
+# Local data / env
+.env*
+*.log
+*.sqlite
+*.db
+data/
+tmp/
+
+# Build artifacts
+dist/
+bin/

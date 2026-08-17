@@ -113,5 +113,18 @@ export function createEngine(container, opts = {}) {
 
   function render() { renderer.render(scene, camera); }
 
-  return { scene, camera, renderer, composeComposition, render, loop, listKits };
+  function dispose() {
+    window.removeEventListener('resize', fit);
+    clearProps();
+    skyGeo.dispose();
+    skyMat.dispose();
+    ground.geometry.dispose();
+    ground.material.dispose();
+    renderer.dispose();
+    if (renderer.domElement.parentElement === container) {
+      container.removeChild(renderer.domElement);
+    }
+  }
+
+  return { scene, camera, renderer, composeComposition, render, loop, listKits, dispose };
 }

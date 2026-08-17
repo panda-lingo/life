@@ -1,0 +1,12 @@
+- For any change, update the relevant documentation first.
+- Work MUST follow Declarative Design: define the desired end state, constraints, and data-driven mappings before implementation details.
+- Any code change must include or update the related unit, integration, and e2e tests.
+- Code changes should improve maintainability and observability.
+- UI must be responsive. Any UI change must include tests across different device sizes (desktop + mobile/redroid).
+- Follow the existing ES-module / no-build-step architecture; keep asset pipeline manifest-driven (assets/kits/manifest.json) so the AI director selects by ID only.
+- All AI provider calls must go through `src/ai/director.js`. Never call the AI provider directly from game/loop, engine, or UI code.
+- Use a subagent when one is available and appropriate for the task.
+- Before handoff, create a commit after the required verification passes.
+- If `gh` is installed and authenticated, do not run tests locally. Push the commit to GitHub, run the relevant tests through the triggered GitHub workflow, and confirm the workflow passes before handoff.
+- If the `panda-lingo/life` workflow cannot start because that repository has reached its GitHub Actions spending limit or has a billing failure, use the dedicated `panda-lingo/life-ci` repository instead. Dispatch `life-private-ci.yml` with `source_ref` set to the exact pushed `life` commit SHA and `publish_image=false`, then confirm that external workflow passes before handoff. The canonical command is `gh workflow run life-private-ci.yml --repo panda-lingo/life-ci -f source_ref="$(git rev-parse HEAD)" -f publish_image=false`.
+- If `gh` is unavailable or not authenticated, run the relevant local tests before handoff and report that GitHub workflow verification could not be performed.
