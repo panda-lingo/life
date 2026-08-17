@@ -113,9 +113,17 @@ export async function openaiProvider({ apiKey, baseURL, model } = {}) {
     );
   }
   const baseUrlUsed = (url || 'https://api.openai.com/v1').replace(/\/$/, '');
+  // Detect browser-like environments so we can pass dangerouslyAllowBrowser
+  // explicitly. The openai SDK otherwise refuses to construct in browsers
+  // because it assumes we'd be leaking the key. Here, the test harness
+  // deliberately injects the key via window.__LIFESPEAK_AI_CONFIG, and we
+  // never ship it to production players.
+  const inBrowser =
+    typeof window !== 'undefined' && typeof window.document !== 'undefined';
   const client = new OpenAI({
     apiKey: key,
     baseURL: url || undefined,
+    ...(inBrowser ? { dangerouslyAllowBrowser: true } : {}),
     // The official SDK doesn't expose a request logger, so we wrap fetch
     // ourselves to log every call as a curl command with auth masked.
     fetch: async (input, init) => {
