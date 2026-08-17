@@ -182,7 +182,17 @@ install_cromite_browser() {
   local release_json apk_url apk_path
   release_json="$(mktemp)"
   apk_path="$(mktemp --suffix=.apk)"
-  curl -fsSL "https://api.github.com/repos/uazo/cromite/releases/latest" -o "$release_json"
+
+  # Use the GitHub REST API with the workflow's GITHUB_TOKEN so we don't
+  # hit the unauthenticated rate limit (403 in the CI log).
+  local curl_auth=()
+  if [[ -n "${GH_TOKEN:-}" ]]; then
+    curl_auth+=(-H "Authorization: Bearer ${GH_TOKEN}")
+  elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    curl_auth+=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+  fi
+
+  curl -fsSL "${curl_auth[@]}" "https://api.github.com/repos/uazo/cromite/releases/latest" -o "$release_json"
   apk_url="$(jq -r --arg asset "$asset" '.assets[] | select(.name == $asset) | .browser_download_url' "$release_json" | head -n 1)"
   if [[ -z "$apk_url" || "$apk_url" == "null" ]]; then
     echo "Could not find Cromite APK asset $asset" >&2
