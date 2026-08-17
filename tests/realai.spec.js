@@ -35,7 +35,7 @@ test.describe('real AI provider (IMAGE_TEXT_*)', () => {
 
     const result = await page.evaluate(async () => {
       const { openaiAsDirector } = await import('/src/ai/openaiProvider.js');
-      const p = openaiAsDirector({});
+      const p = await openaiAsDirector({});
       const raw = await p.complete({
         prompt: [
           'You are a tiny assistant. Respond with VALID JSON only.',

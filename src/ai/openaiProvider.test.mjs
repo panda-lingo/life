@@ -30,7 +30,7 @@ test('real provider: skipped when IMAGE_TEXT_API_KEY missing', { skip: HAS_ENV &
 
 test('openaiProvider: complete() returns text for a chat-only prompt', { skip: !HAS_ENV || !FORMAT_OK }, async () => {
   const { openaiProvider } = await import('./openaiProvider.js');
-  const p = openaiProvider({
+  const p = await openaiProvider({
     model: process.env.IMAGE_TEXT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini',
     baseURL: process.env.IMAGE_TEXT_BASE_URL || process.env.OPENAI_BASE_URL,
   });
@@ -50,7 +50,7 @@ test('openaiProvider: complete() returns text for a chat-only prompt', { skip: !
 
 test('openaiAsDirector: director-shaped prompt flows through system channel', { skip: !HAS_ENV || !FORMAT_OK }, async () => {
   const { openaiAsDirector } = await import('./openaiProvider.js');
-  const p = openaiAsDirector({
+  const p = await openaiAsDirector({
     model: process.env.IMAGE_TEXT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini',
     baseURL: process.env.IMAGE_TEXT_BASE_URL || process.env.OPENAI_BASE_URL,
   });
@@ -74,7 +74,7 @@ test('openaiAsDirector: director-shaped prompt flows through system channel', { 
 
 test('openaiProvider: accepts an image_url content part', { skip: !HAS_ENV || !FORMAT_OK }, async () => {
   const { openaiProvider } = await import('./openaiProvider.js');
-  const p = openaiProvider({
+  const p = await openaiProvider({
     model: process.env.IMAGE_TEXT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini',
     baseURL: process.env.IMAGE_TEXT_BASE_URL || process.env.OPENAI_BASE_URL,
   });
