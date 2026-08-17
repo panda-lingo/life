@@ -73,7 +73,9 @@ Two entry modes from the splash screen:
 | Component | Failure | Fallback |
 |---|---|---|
 | SpeechRecognition | unsupported / permission denied | text input field in HUD |
-| speechSynthesis | no voices | subtitle-only, timed delay |
+| SpeechRecognition | stuck recognizer (no `onstart`/`onerror` — headless/CI Chromium) | `createRecognizer` reports a synthetic `stuck` error after 2s; loop degrades to the same text input |
+| SpeechRecognition | listen watchdog fires with no final transcript (silence/muted mic) | `manual-stop`/`timeout` outcomes degrade to the text input instead of re-listening forever |
+| speechSynthesis | no voices, `synthesis-failed` error (headless/CI), or stalled engine (neither `onend` nor `onerror` fires) | `speak()` wires `onerror` to the same completion callback; the loop additionally races TTS against a rate-scaled watchdog proportional to text length, then continues with the timed pause |
 | AI provider | network down / no key | deterministic mock provider |
 | Google Maps | no key / script blocked / offline | deterministic mock (canned Soho places) |
 | Google Maps | nearby search returns no places (ZERO_RESULTS / quota) | in-HUD "no places" message + `explore.empty` event; no dead-end picker |

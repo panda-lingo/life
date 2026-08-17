@@ -21,6 +21,15 @@ export function createRecognizer({ lang = 'en-US', onInterim, onFinal, onError }
   rec.continuous = false;          // push-to-talk: one utterance per press
   rec.maxAlternatives = 1;
 
+  // Headless/CI Chromium exposes SpeechRecognition but the recognizer never
+  // starts: start() returns and no event (not even onerror) ever fires, which
+  // would wedge callers awaiting onFinal/onError. Detect the stuck start via
+  // onstart and report it as an error so callers degrade to the text path.
+  const started = new Promise((resolve) => {
+    rec.onstart = () => resolve(true);
+    setTimeout(() => resolve(false), 2_000);
+  });
+
   rec.onresult = (e) => {
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const r = e.results[i];
@@ -30,7 +39,10 @@ export function createRecognizer({ lang = 'en-US', onInterim, onFinal, onError }
   };
   rec.onerror = (e) => onError?.(e.error);
   return {
-    start: () => { try { rec.start(); } catch { /* already started */ } },
+    start: () => {
+      try { rec.start(); } catch { /* already started */ }
+      started.then((ok) => { if (!ok) onError?.('stuck'); });
+    },
     stop: () => rec.stop(),
     abort: () => rec.abort(),
   };
@@ -69,7 +81,12 @@ export function speak(text, { voice = null, rate = 1.0, pitch = 1.0, onEnd } = {
   if (voice) u.voice = voice;
   u.rate = rate;                               // expose to UI: 0.85 for B1, 1.0+ for C1
   u.pitch = pitch;
+  // In voice-less environments (headless Chromium, CI, servers) speak() fires
+  // onerror('synthesis-failed') instead of onend; both complete the turn.
+  // Callers racing speak() must also cover the stalled-engine case where
+  // neither event fires (see playNPC's watchdog in game/loop.js).
   u.onend = () => onEnd?.();
+  u.onerror = () => onEnd?.();
   speechSynthesis.speak(u);
   return u;
 }

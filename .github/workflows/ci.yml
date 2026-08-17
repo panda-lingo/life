@@ -52,7 +52,7 @@ jobs:
         run: node -e 'JSON.parse(require("fs").readFileSync("assets/kits/manifest.json","utf8")); console.log("manifest.json OK")'
 
       - name: Run Node unit tests
-        run: node --test 'scenarios/**/*.test.mjs' 'src/data/**/*.test.mjs' 'src/ai/openaiProvider.test.mjs' 'src/gmaps/**/*.test.mjs' 'src/game/**/*.test.mjs'
+        run: node --test 'scenarios/**/*.test.mjs' 'src/data/**/*.test.mjs' 'src/ai/openaiProvider.test.mjs' 'src/speech/**/*.test.mjs' 'src/gmaps/**/*.test.mjs' 'src/game/**/*.test.mjs'
 
       - name: Static syntax check on browser modules
         run: |

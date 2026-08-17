@@ -35,6 +35,13 @@ function createSession() {
 // Tunables.
 const LISTEN_TIMEOUT_MS = 12_000;
 const NPC_PAUSE_MS = 800;            // pacing fallback when TTS missing
+// TTS watchdog: speechSynthesis exists but never completes in voice-less /
+// stalled environments (headless CI fires onerror; a stalled engine fires
+// nothing at all), so playNPC must not await utterance completion unboundedly.
+// Scale with text length (~15 chars/s at rate 1.0) so real speech always wins
+// the race; the floor keeps very short lines from timing out under jitter.
+const TTS_FLOOR_MS = 3_000;
+const TTS_MS_PER_CHAR = 75;
 
 /**
  * Boot the game. Container is the DOM node the Three.js renderer mounts to.
@@ -273,12 +280,27 @@ async function playNPC(s, text) {
   await emit('npc.said', { text });
   await renderHUD({ lastNPC: text });
   if (speechCapabilities().tts) {
-    return new Promise((resolve) => {
+    const spoken = new Promise((resolve) => {
       speak(text, {
         voice: pickVoice({ lang: 'en', preferFemale: true }),
-        onEnd: resolve,
+        onEnd: resolve,                 // also fires from speak()'s onerror
       });
     });
+    // Watchdog: if the engine neither ends nor errors (stalled), continue with
+    // pacing rather than freezing the dialogue; cancel the stuck utterance.
+    const timeout = Math.min(
+      30_000,
+      Math.max(TTS_FLOOR_MS, text.length * TTS_MS_PER_CHAR),
+    );
+    let timedOut = false;
+    const watchdog = new Promise((resolve) => setTimeout(() => {
+      timedOut = true;
+      stopSpeaking();
+      resolve();
+    }, timeout));
+    await Promise.race([spoken, watchdog]);
+    if (timedOut) console.warn('TTS watchdog: utterance never completed; continuing without audio');
+    return;
   }
   // No TTS: brief pause so the dialogue still paces.
   await new Promise((r) => setTimeout(r, NPC_PAUSE_MS));
@@ -327,7 +349,11 @@ async function capturePlayerUtterance(s, { signal }) {
 
   if (result.kind === 'final' && result.text) return result.text;
 
-  if (['unavailable', 'error', 'aborted', 'manual-stop'].includes(result.kind)) {
+  // 'timeout' (recognizer stopped with no final transcript) also falls to the
+  // text path: in headless/CI the mic captures silence forever, so without
+  // this the loop would re-listen indefinitely and the typed fallback that
+  // e2e specs drive would never render.
+  if (['unavailable', 'error', 'aborted', 'manual-stop', 'timeout'].includes(result.kind)) {
     const typed = await showTextInput({
       placeholder: 'Speech unavailable — type your reply',
       signal,

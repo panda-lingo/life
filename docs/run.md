@@ -60,8 +60,14 @@ non-root `nginx` user with a built-in healthcheck on `/`.
 
 - **Push-to-talk**: hold the mic button, speak, release. Interim transcript
   streams live; release (or auto-timeout after 12s) scores the utterance.
-- **Text input fallback**: if SpeechRecognition is unavailable (rare), a text
-  field appears and works identically.
+- **Text input fallback**: if SpeechRecognition is unavailable, never starts
+  (headless Chromium), or a listen times out with no transcript, a text field
+  appears and works identically. This is the path e2e runs drive.
+- **TTS degradation**: NPC lines are spoken via speechSynthesis where voices
+  exist. Where synthesis errors (no voices — headless/CI/servers) or the
+  engine stalls, the dialogue continues automatically after a rate-scaled
+  watchdog (`TTS_FLOOR_MS` floor, ~75 ms/char in `src/game/loop.js`) so the
+  game never freezes on audio.
 - **Export data**: click the export icon in the HUD to download
   `lifespeak-export-YYYY-MM-DD.jsonl` for offline analysis.
 
