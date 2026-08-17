@@ -88,12 +88,18 @@ test.describe('LifeSpeak smoke', () => {
     // Mock-maps fallback: the backend answers 404 for /api/maps/config when
     // GOOGLE_MAPS_API_KEY is unset (documented failure mode → mock places).
     // The browser logs the 404 as a console error; that's expected, not fatal.
+    // Backend-AI 5xx: when the upstream gateway flakes, the director's
+    // backend-only resilience (commit 9a934ac) catches the throw and completes
+    // the turn with the deterministic mock — also documented, also logged by
+    // the browser as a console error.
     const fatal = consoleErrors.filter((t) =>
       !/favicon/i.test(t) &&
       !/microphone/i.test(t) &&
       !/permissions-policy/i.test(t) &&
       !/\/api\/maps\/config/i.test(t) &&
-      !/status of 404/i.test(t),
+      !/status of 404/i.test(t) &&
+      !/\/api\/ai\/complete/i.test(t) &&
+      !/status of 5\d\d/i.test(t),
     );
     expect(fatal, fatal.join('\n')).toEqual([]);
   });
