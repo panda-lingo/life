@@ -12,6 +12,7 @@ let state = {};
 // Promise per choice / per listening session.
 const choiceWaiters = new Set();
 const textWaiters = new Set();
+const placeWaiters = new Set();
 
 function ensureContainer() {
   if (container) return;
@@ -41,13 +42,15 @@ function renderDialogue() {
 
 function renderChoice() {
   const wrap = document.createElement('div');
+  // Stable id so integration/e2e tests can target choice buttons without
+  // matching on localized button text.
+  wrap.id = 'hud-choice';
   state.choice.forEach((opt) => {
     const b = document.createElement('button');
     b.textContent = opt.text;
+    b.dataset.choice = opt.text;
     b.style.cssText = 'margin:4px;padding:8px 12px;border-radius:8px;border:0;background:#6c8cff;color:#fff;';
     b.onclick = () => {
-      // Resolve every waiter exactly once. First-pick-wins semantics keep
-      // the rest of the choice buttons inert after a click.
       if (!choiceWaiters.size) return;
       const pending = [...choiceWaiters];
       choiceWaiters.clear();
@@ -84,6 +87,50 @@ function renderTextInput() {
   return wrap;
 }
 
+function renderActions() {
+  const wrap = document.createElement('div');
+  wrap.id = 'hud-actions';
+  wrap.style.cssText = 'display:flex; flex-direction:column; gap:8px; max-height:40vh; overflow-y:auto;';
+  state.actions.forEach((action) => {
+    const b = document.createElement('button');
+    b.textContent = action.label;
+    b.dataset.action = action.id || action.label;
+    b.style.cssText =
+      'padding:12px 14px; min-height:44px; border-radius:8px; border:0;' +
+      'background:#3d4254; color:#fff; text-align:left; font-size:14px; cursor:pointer;';
+    b.onclick = () => {
+      if (state.textInput) return;         // modal dialogue input owns the tap
+      action.onChoose?.();
+    };
+    wrap.appendChild(b);
+  });
+  return wrap;
+}
+
+function renderPlacePicker() {
+  const wrap = document.createElement('div');
+  wrap.id = 'hud-place-picker';
+  wrap.style.cssText = 'display:flex; flex-direction:column; gap:8px; max-height:40vh; overflow-y:auto;';
+  state.places.forEach((p) => {
+    const b = document.createElement('button');
+    b.className = 'place';
+    b.dataset.placeId = p.placeId;
+    b.textContent = `📍 ${p.name} — ${p.vicinity}${p.rating ? ` (${p.rating}★)` : ''}`;
+    b.style.cssText =
+      'padding:12px 14px; min-height:44px; border-radius:8px; border:0;' +
+      'background:#3d4254; color:#fff; text-align:left; font-size:14px; cursor:pointer;';
+    b.onclick = () => {
+      if (state.textInput) return;
+      if (!placeWaiters.size) return;
+      const pending = [...placeWaiters];
+      placeWaiters.clear();
+      pending.forEach((resolve) => resolve(p));
+    };
+    wrap.appendChild(b);
+  });
+  return wrap;
+}
+
 function renderDebrief() {
   const div = document.createElement('div');
   div.textContent = `Debrief: ${JSON.stringify(state.debrief)}`;
@@ -98,13 +145,20 @@ export async function renderHUD(update) {
   container.appendChild(renderDialogue());
   if (state.choice) container.appendChild(renderChoice());
   if (state.textInput) container.appendChild(renderTextInput());
+  if (state.actions) container.appendChild(renderActions());
+  if (state.places) container.appendChild(renderPlacePicker());
   if (state.debrief) container.appendChild(renderDebrief());
   return state;
 }
 
 // Promise-returning pub/sub bridge: the loop awaits a click on a choice
-// button. Rejects cleanly when the caller aborts via AbortSignal.
+// button. Rejects cleanly when the caller aborts via AbortSignal. The HUD
+// only upgrades to a visible choice list for 2+ options — a single-option
+// step (or none) auto-resolves so no dead-end screen can appear.
 export function showChoice(options, { signal } = {}) {
+  if (signal?.aborted) return Promise.reject(new DOMException('aborted', 'AbortError'));
+  if (!options?.length) return Promise.resolve(null);
+  if (options.length === 1) return Promise.resolve(options[0]);
   renderHUD({ choice: options });
   return new Promise((resolve, reject) => {
     const entry = (v) => { choiceWaiters.delete(entry); resolve(v); };
@@ -138,6 +192,31 @@ export function showTextInput({ placeholder, signal } = {}) {
   });
 }
 
+export function showPlacePicker(places, { signal } = {}) {
+  renderHUD({ places, lastNPC: 'Pick a place to explore' });
+  return new Promise((resolve) => {
+    const entry = (v) => { placeWaiters.delete(entry); resolve(v); };
+    placeWaiters.add(entry);
+    if (signal) {
+      const onAbort = () => { placeWaiters.delete(entry); resolve(null); };
+      if (signal.aborted) return onAbort();
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+  });
+}
+
+// Promise-returning bridge for the explore-mode place picker: the loop
+// awaits a tap on one of the listed real-world places.
+
 export function clearHUDOverlays() {
-  renderHUD({ choice: null, textInput: false, lastNPC: null, listening: false });
+  renderHUD({ choice: null, textInput: false, lastNPC: null, listening: false, actions: null, places: null });
+}
+
+// Test hook: reset internal HUD state between e2e scenarios.
+export function __resetHUDForTests() {
+  if (container) { container.remove(); container = null; }
+  state = {};
+  choiceWaiters.clear();
+  textWaiters.clear();
+  placeWaiters.clear();
 }

@@ -8,8 +8,31 @@ npx serve .
 python3 -m http.server 8080
 ```
 
-Open `http://localhost:8080` in Chrome/Edge/Firefox. Click **Start**, allow
-microphone access, and hold the **talk** button (or the mic hotkey) to speak.
+Open `http://localhost:8080` in Chrome/Edge/Firefox. Click **Start** (classic
+3D scenarios), allow microphone access, and hold the **talk** button (or the
+mic hotkey) to speak.
+
+## Explore mode (Google Maps)
+
+The splash screen has a second entry: **Explore a real place**. Instead of the
+3D stage, the game shows a map of your surroundings, lists nearby places
+(cafés, restaurants, parks …), and builds a dialogue beat out of the place you
+pick — same scoring, debrief, and learner-model pipeline as classic mode.
+
+Configuration is read from `window.__LIFESPEAK_GOOGLE_MAPS_CONFIG` (set before
+the page script runs, e.g. via a small inline script in a local-only HTML page)
+or from `GOOGLE_MAPS_API_KEY` / `GOOGLE_MAPS_MAP_ID` env vars where a
+`process.env` exists. Both are optional — nothing needs configuring to play:
+- **No key** → deterministic *mock mode*: a canned center and three mock
+  places (`The Central Perk Café` etc.) appear. This is the default for local
+  dev and CI, and all e2e/integration coverage runs against it.
+- **Key set** → the Maps JS API loads with the Places library; geolocation
+  permission is best-effort (denied → fallback center, Places search still
+  runs). All Maps traffic goes through `src/gmaps/maps.js`, which logs every
+  request/response (url, action, headers, body, masked-key curl
+  reconstruction) per the project HTTP-logging constraint. If a live search
+  returns zero places (ZERO_RESULTS / quota errors), the HUD says so and the
+  page returns to the splash — the place picker never renders empty.
 
 ## Mobile (same Wi-Fi)
 
@@ -46,12 +69,13 @@ non-root `nginx` user with a built-in healthcheck on `/`.
 
 ```bash
 # Tests
-node --test scenarios/ src/data/
+npm test
 
 # Syntax check (CI uses this)
 for f in src/engine/engine.js src/engine/props.js src/game/loop.js \
          src/ai/director.js src/ai/provider.js src/ai/mockProvider.js \
          src/data/eventlog.js src/data/learnerModel.js src/data/analytics.js \
+         src/gmaps/maps.js \
          src/speech/speech.js src/ui/hud.js \
          scenarios/scenarios.js; do
   node --check "$f"

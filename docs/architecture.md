@@ -27,13 +27,27 @@
        │                                          │
        │                              IndexedDB / JSONL export
        │
-       └────────────── AI director (text+image → text)
-                    ┌──────────┐
-                    │    ai/   │
-                    │ director │  ← mock provider by default
-                    │ provider │  ← real HTTP provider adapter
-                    └──────────┘
+       ├────────────── AI director (text+image → text)
+       │           ┌──────────┐
+       │           │    ai/   │
+       │           │ director │  ← mock provider by default
+       │           │ provider │  ← real HTTP provider adapter
+       │           └──────────┘
+       │
+       └────────────── Google Maps (real-world explore mode)
+                   ┌──────────┐
+                   │  gmaps/  │
+                   │ maps.js  │  ← boundary: game never calls Google directly
+                   └──────────┘  ← deterministic mock when no API key
 ```
+
+Two entry modes from the splash screen:
+
+- **Start** — the classic scenario-graph game (Three.js engine, AI director picks beats).
+- **Explore a real place** — Google Maps explorer (`startExplore`). The player
+  searches real cafés/shops/parks nearby, picks one from the list, and the
+  place is bridged into the scenario engine via `placeToBeat()` so the same
+  dialogue/scoring pipeline runs against a real location.
 
 ## Data flow per dialogue turn
 
@@ -61,6 +75,8 @@
 | SpeechRecognition | unsupported / permission denied | text input field in HUD |
 | speechSynthesis | no voices | subtitle-only, timed delay |
 | AI provider | network down / no key | deterministic mock provider |
+| Google Maps | no key / script blocked / offline | deterministic mock (canned Soho places) |
+| Google Maps | nearby search returns no places (ZERO_RESULTS / quota) | in-HUD "no places" message + `explore.empty` event; no dead-end picker |
 | IndexedDB | quota exceeded | in-memory log + warning banner |
 | WebGL | context lost | canvas pause + retry button |
 
@@ -70,6 +86,13 @@
 - `learnerModel.js`: pure functions, no I/O
 - `speech.js`: `createRecognizer({onInterim,onFinal,onError})`, `speak(text, opts)`, `speechCapabilities()`
 - `director.js`: five JSON-contract functions; the only file that talks to the AI provider
+- `gmaps/maps.js`: `createExplorer(container) -> {mock, searchNearby, getDetails, dispose}`,
+  `placeToBeat(place) -> scenario-beat shape`; the only file that talks to Google Maps.
+  Honors `GOOGLE_MAPS_API_KEY` / `GOOGLE_MAPS_MAP_ID` env, or
+  `window.__LIFESPEAK_GOOGLE_MAPS_CONFIG` at browser runtime; falls back to mock.
 - `engine.js`: `createEngine(container)`, `composeComposition(comp)`, `listKits()`
-- `hud.js`: `renderHUD(update)`, `showChoice(options) -> Promise<choice>`, `listenOnce() -> Promise<transcript>`
-- `loop.js`: `startGame(container)`; the only place that imports all modules
+- `hud.js`: `renderHUD(update)`, `showChoice(options) -> Promise<choice>`,
+  `showTextInput({placeholder})`, `showPlacePicker(places)`, `clearHUDOverlays()`
+- `loop.js`: `startGame(container)` (classic 3D mode; lazy-imports `engine.js`)
+  and `startExplore(container)` (maps mode; never loads three.js) — the only
+  file that talks to every other module

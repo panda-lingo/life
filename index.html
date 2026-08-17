@@ -6,17 +6,19 @@
   <title>LifeSpeak — Speak English. Live the life.</title>
   <style>
     html,body { margin:0; padding:0; height:100%; background:#1a1a22; overflow:hidden; font-family:system-ui,sans-serif; color:#fff; }
-    #stage { position:fixed; inset:0; }
+    #stage, #gmaps-stage { position:fixed; inset:0; }
     .splash { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:12px; }
     .splash button { padding:14px 22px; min-height:48px; min-width:88px; border-radius:10px; border:0; background:#6c8cff; color:#fff; font-size:17px; }
   </style>
 </head>
 <body>
   <div id="stage"></div>
+  <div id="gmaps-stage" hidden></div>
   <div class="splash" id="splash">
     <h1>LifeSpeak</h1>
     <p>Practice English by living it. Speak through real situations.</p>
     <button id="start">Start</button>
+    <button id="explore">Explore a real place</button>
   </div>
   <script type="importmap">
     {"imports": {
@@ -25,10 +27,16 @@
     }}
   </script>
   <script type="module">
-    import { startGame } from './src/game/loop.js';
+    import { startGame, startExplore } from './src/game/loop.js';
     document.getElementById('start').onclick = async () => {
       document.getElementById('splash').remove();
       await startGame(document.getElementById('stage'));
+    };
+    document.getElementById('explore').onclick = async () => {
+      document.getElementById('splash').remove();
+      const stage = document.getElementById('gmaps-stage');
+      stage.hidden = false;
+      await startExplore(stage);
     };
   </script>
 </body>

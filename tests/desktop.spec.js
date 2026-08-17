@@ -65,4 +65,29 @@ test.describe('LifeSpeak smoke', () => {
     );
     expect(fatal, fatal.join('\n')).toEqual([]);
   });
+
+  test('explore mode: place picker → café dialogue (mock maps)', async ({ page }) => {
+    // No GOOGLE_MAPS_API_KEY in CI: maps boundary falls back to deterministic
+    // mock mode with 3 canned places. Drive the real user path: click
+    // Explore, pick the café, advance one dialogue turn via the text-input
+    // fallback (no SpeechRecognition in headless Chromium).
+    await page.goto('/');
+    await page.locator('#explore').click();
+    await expect(page.locator('#splash')).toHaveCount(0, { timeout: 5000 });
+
+    const picker = page.locator('#hud-place-picker');
+    await expect(picker).toBeVisible({ timeout: 10_000 });
+    await expect(picker.locator('button.place')).toHaveCount(3);
+    await picker.locator('button.place').first().click();
+
+    // NPC opens, then the loop awaits a STT session that degrades to the
+    // typed reply path — assert the dialogue HUD renders.
+    await expect(page.locator('#hud')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('#hud input')).toBeVisible({ timeout: 20_000 });
+
+    const fatal = consoleErrors.filter((t) =>
+      !/favicon/i.test(t) && !/microphone/i.test(t) && !/permissions-policy/i.test(t),
+    );
+    expect(fatal, fatal.join('\n')).toEqual([]);
+  });
 });

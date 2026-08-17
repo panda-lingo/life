@@ -57,4 +57,31 @@ test.describe('LifeSpeak mobile (redroid)', () => {
     );
     expect(fatal, fatal.join('\n')).toEqual([]);
   });
+
+  test('explore mode: place picker tappable, dialogue HUD renders (mock maps)', async ({ page }) => {
+    // Same flow as the desktop explore test, exercised at the redroid
+    // viewport: mock maps mode (no API key in CI), tap needs to hit the
+    // 44px-tall place buttons.
+    await page.goto('/');
+    await page.locator('#explore').tap();
+    await expect(page.locator('#splash')).toHaveCount(0, { timeout: 5000 });
+
+    const picker = page.locator('#hud-place-picker');
+    await expect(picker).toBeVisible({ timeout: 10_000 });
+    await expect(picker.locator('button.place')).toHaveCount(3);
+
+    // Tap target: every place button meets the 44px minimum.
+    const box = await picker.locator('button.place').first().boundingBox();
+    expect(box).not.toBeNull();
+    expect(box.height).toBeGreaterThanOrEqual(44);
+
+    await picker.locator('button.place').first().tap();
+    await expect(page.locator('#hud')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('#hud input')).toBeVisible({ timeout: 20_000 });
+
+    const fatal = consoleErrors.filter((t) =>
+      !/favicon/i.test(t) && !/microphone/i.test(t) && !/permissions-policy/i.test(t),
+    );
+    expect(fatal, fatal.join('\n')).toEqual([]);
+  });
 });

@@ -3,7 +3,6 @@
 // all events. This is the only file that talks to every other module.
 
 import { beats, eligibleBeats, applyEffects } from '../../scenarios/scenarios.js';
-import { createEngine } from '../engine/engine.js';
 import { initSession, emit, downloadExport } from '../data/eventlog.js';
 import {
   createLearnerModel, updateLanguage, updateSkills,
@@ -15,7 +14,8 @@ import {
 import {
   directNextScenario, composeScene, npcTurn, scoreUtterance, debriefScenario,
 } from '../ai/director.js';
-import { renderHUD, showChoice, showTextInput, clearHUDOverlays } from '../ui/hud.js';
+import { renderHUD, showChoice, showTextInput, showPlacePicker, clearHUDOverlays } from '../ui/hud.js';
+import { createExplorer, placeToBeat } from '../gmaps/maps.js';
 
 // --------- per-session state ---------
 let session = null;
@@ -51,6 +51,11 @@ export async function startGame(container) {
     skillsFocus: ['conflict', 'time', 'collaboration'],
   });
 
+  // Lazy: the Three.js engine (and its `three` bare specifier, resolved via
+  // the index.html importmap) is only needed for the classic 3D game. Explore
+  // mode is a flat map + HUD and never pulls this in — which also keeps the
+  // module importable in bare Node for integration tests.
+  const { createEngine } = await import('../engine/engine.js');
   const e = createEngine(container);
   s.engineRef = e;
   s.stopLoop = e.loop(() => e.render());
@@ -80,24 +85,115 @@ export async function startGame(container) {
   stopSpeaking();
 }
 
-async function runNextBeat(s, { signal, candidates }) {
-  const { beatId, framing } = await directNextScenario({
+/**
+ * Explore mode: boot Google Maps in the given container and let the player
+ * discover real-world places nearby, then walk a scenario beat built from
+ * the chosen place via the maps boundary (`placeToBeat`). Uses the same
+ * dialogue / scoring / debrief pipeline as the classic game.
+ *
+ * With no `GOOGLE_MAPS_API_KEY` (local dev, CI), the maps module falls back
+ * to a deterministic mock so the whole flow remains playable and testable.
+ */
+export async function startExplore(container, { explorerFactory = createExplorer } = {}) {
+  const s = (session = createSession());
+  const { signal } = s.ctrl;
+
+  // Geolocate before initSession: emit() persists to IndexedDB, which is
+  // unavailable in bare Node (unit tests), so nothing must be emitted until
+  // player interaction begins in a real browser.
+  const center = await currentPosition();
+
+  initSession({
+    mode: 'explore',
+    selfAssessedLevel: 'B1',
+    targetLevel: 'C1',
+    skillsFocus: ['interaction'],
+  });
+
+  const explorer = await explorerFactory(container, { center });
+  await emit('explore.start', { mode: explorer.mock ? 'mock' : 'live', center });
+
+  const earliestPlaces = await explorer.searchNearby({ location: center, radius: 500 });
+  await emit('places.searched', { count: earliestPlaces.length });
+
+  // Zero-results live search (ZERO_RESULTS, quota/limit errors — the maps
+  // boundary resolves [] for every non-OK status) must never render an
+  // empty, dead-end picker: report it and hand control back to the splash
+  // screen. Same no-dead-screen guard showChoice applies to empty option
+  // lists.
+  if (!earliestPlaces.length) {
+    await renderHUD({
+      lastNPC: 'No places found nearby — check your connection or API key, then try again.',
+    });
+    await emit('explore.empty', { mode: explorer.mock ? 'mock' : 'live' });
+    explorer.dispose();
+    returnToSplash();
+    return false;
+  }
+
+  const chosen = await showPlacePicker(earliestPlaces, { signal });
+  if (signal.aborted || !chosen) { explorer.dispose(); return; }
+  clearHUDOverlays();
+  await emit('place.selected', {
+    placeId: chosen.placeId, name: chosen.name, rating: chosen.rating,
+  });
+
+  const continued = await runNextBeat(s, {
+    signal,
+    candidates: [{
+      id: `real-place:${chosen.placeId}`,
+      framing: chosen.name,
+      skillFocus: ['interaction'],
+      cefrRange: ['B1', 'C1'],
+    }],
+    beatMap: { [`real-place:${chosen.placeId}`]: placeToBeat(chosen) },
+  });
+  return continued;
+}
+
+// Best-effort geolocation; resolves null when unsupported or denied.
+function currentPosition({ timeoutMs = 4_000 } = {}) {
+  return new Promise((resolve) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return resolve(null);
+    const timer = setTimeout(() => resolve(null), timeoutMs);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        clearTimeout(timer);
+        resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      },
+      () => { clearTimeout(timer); resolve(null); },
+      { timeout: timeoutMs, maximumAge: 60_000 },
+    );
+  });
+}
+
+// No-progress escape hatch: reload back to the splash screen. Used by the
+// zero-results explore path, where the splash was already removed and the
+// HUD has no navigation affordance.
+function returnToSplash() {
+  setTimeout(() => { if (typeof location !== 'undefined') location.reload(); }, 2_000);
+}
+
+async function runNextBeat(s, { signal, candidates, beatMap = beats }) {  const { beatId, framing } = await directNextScenario({
     worldState: s.worldState,
     learnerModel: s.learnerModel,
     candidates,
     fossilized: fossilizedErrors(s.learnerModel),
   });
-  s.currentBeat = beats[beatId];
+  s.currentBeat = beatMap[beatId];
   if (!s.currentBeat) return false;
 
   await emit('beat.start', { beatId, framing, worldState: structuredClone(s.worldState) });
 
-  // 1. Compose + render the scene.
-  const composition = await composeScene({
-    beat: s.currentBeat, availableKits: s.engineRef.listKits(), worldState: s.worldState,
-  });
-  s.engineRef.composeComposition(composition);
-  await emit('scene.composed', { beatId, composition });
+  // 1. Compose + render the scene (only when a 3D engine is mounted —
+  // explore mode renders the map instead and skips scene composition).
+  if (s.engineRef) {
+    const composition = await composeScene({
+      beat: s.currentBeat, availableKits: s.engineRef.listKits(), worldState: s.worldState,
+    });
+    s.engineRef.composeComposition(composition);
+    await emit('scene.composed', { beatId, composition });
+  }
 
   // 2. Opening line from the NPC.
   const opening = await npcTurn({
@@ -149,6 +245,7 @@ async function playDialogueSteps(s, { signal, beat }) {
       await playNPC(s, reply.text);
     } else if (step.kind === 'choice') {
       await presentChoice(s, { signal, step });
+      await clearHUDOverlays();
     } else if (isNarration) {
       await playNPC(s, step.text);
     } else if (step.kind === 'end') {

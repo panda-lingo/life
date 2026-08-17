@@ -5,8 +5,8 @@
   "description": "LifeSpeak — AI-native 3D life-simulation game for English speaking practice (CEFR B1→C1).",
   "type": "module",
   "scripts": {
-    "test": "node --test 'scenarios/**/*.test.mjs' 'src/data/**/*.test.mjs' 'src/ai/openaiProvider.test.mjs'",
-    "test:unit": "node --test 'scenarios/**/*.test.mjs' 'src/data/**/*.test.mjs' 'src/ai/openaiProvider.test.mjs'",
+    "test": "node --test 'scenarios/**/*.test.mjs' 'src/data/**/*.test.mjs' 'src/ai/openaiProvider.test.mjs' 'src/gmaps/**/*.test.mjs' 'src/game/**/*.test.mjs'",
+    "test:unit": "node --test 'scenarios/**/*.test.mjs' 'src/data/**/*.test.mjs' 'src/ai/openaiProvider.test.mjs' 'src/gmaps/**/*.test.mjs' 'src/game/**/*.test.mjs'",
     "test:e2e": "playwright test",
     "test:e2e:ci": "playwright test --workers=1",
     "test:e2e:ci:mobile": "PLAYWRIGHT_TEST_BASE_URL=http://127.0.0.1:8080 playwright test --workers=1 --project=mobile"

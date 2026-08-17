@@ -52,13 +52,14 @@ jobs:
         run: node -e 'JSON.parse(require("fs").readFileSync("assets/kits/manifest.json","utf8")); console.log("manifest.json OK")'
 
       - name: Run Node unit tests
-        run: node --test 'scenarios/**/*.test.mjs' 'src/data/**/*.test.mjs' 'src/ai/openaiProvider.test.mjs'
+        run: node --test 'scenarios/**/*.test.mjs' 'src/data/**/*.test.mjs' 'src/ai/openaiProvider.test.mjs' 'src/gmaps/**/*.test.mjs' 'src/game/**/*.test.mjs'
 
       - name: Static syntax check on browser modules
         run: |
           for f in src/engine/engine.js src/engine/props.js src/game/loop.js \
                    src/ai/director.js src/ai/provider.js src/ai/openaiProvider.js src/ai/mockProvider.js \
                    src/data/eventlog.js src/data/learnerModel.js src/data/analytics.js \
+                   src/gmaps/maps.js \
                    src/speech/speech.js src/ui/hud.js \
                    scenarios/scenarios.js; do
             node --check "$f"
