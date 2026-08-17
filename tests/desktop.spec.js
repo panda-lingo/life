@@ -46,7 +46,7 @@ test.describe('LifeSpeak smoke', () => {
       const propIds = new Set();
       for (const kit of manifest.kits) for (const layout of kit.layouts)
         for (const slot of layout.slots) for (const opt of slot.options) propIds.add(opt);
-      const allScen = scen.beats.map((b) => b.location);
+      const allScen = Object.values(scen.beats).map((b) => b.location);
       const missing = allScen.filter((loc) => !manifest.kits.find((k) => k.id === loc));
       return { scenarioLocations: allScen, kits: manifest.kits.map((k) => k.id), missing, propCount: propIds.size };
     });
