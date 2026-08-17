@@ -18,6 +18,9 @@
     <p>Practice English by living it. Speak through real situations.</p>
     <button id="start">Start</button>
   </div>
+  <script type="importmap">
+    {"imports": {"three": "/src/vendor/three.module.min.js"}}
+  </script>
   <script type="module">
     import { startGame } from './src/game/loop.js';
     document.getElementById('start').onclick = async () => {
