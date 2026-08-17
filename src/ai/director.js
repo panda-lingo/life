@@ -68,7 +68,32 @@ function jsonPrompt(system, task, context) {
 
 async function call(system, task, context, { image = null } = {}) {
   const p = await getProvider();
-  const raw = await p.complete({ prompt: jsonPrompt(system, task, context), image });
+  const prompt = jsonPrompt(system, task, context);
+  // Backend-only resilience: when the chosen provider is the backend server
+  // proxy, a 5xx (or network throw) must NOT crash the dialogue beat. Log
+  // a masked line and complete the turn with the deterministic mock. We
+  // intentionally don't retry — retry multiplies pressure on a known-flaky
+  // upstream (Qwen3.5 503 bursts) and the mock is <5ms. Non-backend providers
+  // (openai direct, window override) still throw: masking their bugs would
+  // hide real failures.
+  if (p.name === 'backend') {
+    try {
+      const raw = await p.complete({ prompt, image });
+      return JSON.parse(extractJSON(raw));
+    } catch (err) {
+      const status = err?.status;
+      // 4xx errors are client-side bugs (malformed prompt, bad max_tokens, etc.)
+      // and must re-throw so callers see the failure. Only 5xx / network throws
+      // fall back to mock.
+      if (typeof status === 'number' && status >= 400 && status < 500) {
+        throw err;
+      }
+      console.warn(`[ai-director] backend provider failed (${status ?? 'network'}); degrading this turn to mock`);
+      const raw = await _mock.complete({ prompt, image });
+      return JSON.parse(extractJSON(raw));
+    }
+  }
+  const raw = await p.complete({ prompt, image });
   return JSON.parse(extractJSON(raw));
 }
 
