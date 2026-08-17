@@ -30,6 +30,9 @@ jobs:
       IMAGE_TEXT_BASE_URL: ${{ vars.IMAGE_TEXT_BASE_URL }}
       IMAGE_TEXT_MODEL: ${{ vars.IMAGE_TEXT_MODEL }}
       IMAGE_TEXT_API_KEY: ${{ secrets.IMAGE_TEXT_API_KEY }}
+      # Set to 1 when the targeted model supports image_url content parts.
+      # Default empty = opt out (Qwen3.5-122B-A10B is text-only and 500s).
+      IMAGE_TEXT_SUPPORTS_VISION: ${{ vars.IMAGE_TEXT_SUPPORTS_VISION }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7

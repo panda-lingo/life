@@ -19,7 +19,10 @@
     <button id="start">Start</button>
   </div>
   <script type="importmap">
-    {"imports": {"three": "/src/vendor/three.module.min.js"}}
+    {"imports": {
+      "three": "/src/vendor/three.module.min.js",
+      "openai": "/src/vendor/openai.module.min.js"
+    }}
   </script>
   <script type="module">
     import { startGame } from './src/game/loop.js';

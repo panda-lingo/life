@@ -54,7 +54,9 @@ test('openaiAsDirector: director-shaped prompt flows through system channel', { 
     model: process.env.IMAGE_TEXT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini',
     baseURL: process.env.IMAGE_TEXT_BASE_URL || process.env.OPENAI_BASE_URL,
   });
-  // Mimic exactly the shape director.js builds.
+  // Mimic exactly the shape director.js builds. Cap maxTokens high enough
+  // for reasoning models (e.g. Qwen, R1-class) whose long chains of thought
+  // can exhaust the budget before the JSON answer is emitted.
   const system = 'You are a tiny assistant. Respond with VALID JSON only.';
   const prompt = [
     system,
@@ -66,13 +68,20 @@ test('openaiAsDirector: director-shaped prompt flows through system channel', { 
     '',
     'Respond with VALID JSON only. No markdown fences, no commentary.',
   ].join('\n');
-  const raw = await p.complete({ prompt });
+  const raw = await p.complete({ prompt, maxTokens: 4096 });
   const parsed = JSON.parse(raw);
   assert.ok(['sunny', 'rainy', 'snowy'].includes(parsed.choice || parsed.weather),
     `expected one of sunny|rainy|snowy; got ${raw}`);
 });
 
-test('openaiProvider: accepts an image_url content part', { skip: !HAS_ENV || !FORMAT_OK }, async () => {
+// Image input is a per-model capability. Text-only models (e.g.
+// Qwen3.5-122B-A10B behind the dev gateway) can refuse or 500 the
+// `image_url` part — opt in by setting IMAGE_TEXT_SUPPORTS_VISION=1.
+const SUPPORTS_VISION = /^(1|true|yes)$/i.test(String(process.env.IMAGE_TEXT_SUPPORTS_VISION || ''));
+
+test('openaiProvider: accepts an image_url content part', {
+  skip: !HAS_ENV || !FORMAT_OK || !SUPPORTS_VISION,
+}, async () => {
   const { openaiProvider } = await import('./openaiProvider.js');
   const p = await openaiProvider({
     model: process.env.IMAGE_TEXT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini',
