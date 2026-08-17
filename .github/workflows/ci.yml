@@ -25,6 +25,11 @@ jobs:
     name: Node unit tests + manifest validation
     timeout-minutes: 15
     runs-on: ubuntu-latest
+    env:
+      IMAGE_TEXT_API_FORMAT: ${{ vars.IMAGE_TEXT_API_FORMAT }}
+      IMAGE_TEXT_BASE_URL: ${{ vars.IMAGE_TEXT_BASE_URL }}
+      IMAGE_TEXT_MODEL: ${{ vars.IMAGE_TEXT_MODEL }}
+      IMAGE_TEXT_API_KEY: ${{ secrets.IMAGE_TEXT_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -44,12 +49,12 @@ jobs:
         run: node -e 'JSON.parse(require("fs").readFileSync("assets/kits/manifest.json","utf8")); console.log("manifest.json OK")'
 
       - name: Run Node unit tests
-        run: node --test 'scenarios/**/*.test.mjs' 'src/data/**/*.test.mjs'
+        run: node --test 'scenarios/**/*.test.mjs' 'src/data/**/*.test.mjs' 'src/ai/openaiProvider.test.mjs'
 
       - name: Static syntax check on browser modules
         run: |
           for f in src/engine/engine.js src/engine/props.js src/game/loop.js \
-                   src/ai/director.js src/ai/provider.js src/ai/mockProvider.js \
+                   src/ai/director.js src/ai/provider.js src/ai/openaiProvider.js src/ai/mockProvider.js \
                    src/data/eventlog.js src/data/learnerModel.js src/data/analytics.js \
                    src/speech/speech.js src/ui/hud.js \
                    scenarios/scenarios.js; do
@@ -71,6 +76,11 @@ jobs:
     name: Desktop e2e (Playwright + Chrome)
     timeout-minutes: 20
     runs-on: ubuntu-latest
+    env:
+      IMAGE_TEXT_API_FORMAT: ${{ vars.IMAGE_TEXT_API_FORMAT }}
+      IMAGE_TEXT_BASE_URL: ${{ vars.IMAGE_TEXT_BASE_URL }}
+      IMAGE_TEXT_MODEL: ${{ vars.IMAGE_TEXT_MODEL }}
+      IMAGE_TEXT_API_KEY: ${{ secrets.IMAGE_TEXT_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -121,6 +131,7 @@ jobs:
           done
           curl -fsS "http://127.0.0.1:${GAME_PORT}/" >/dev/null
           npx playwright test --project=desktop --workers=1
+          npx playwright test --project=desktop --workers=1 tests/realai.spec.js
           docker stop lifespeak-e2e >/dev/null || true
 
       - name: Upload desktop e2e artifacts

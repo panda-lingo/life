@@ -5,6 +5,7 @@
 - UI must be responsive. Any UI change must include tests across different device sizes (desktop + mobile/redroid).
 - Follow the existing ES-module / no-build-step architecture; keep asset pipeline manifest-driven (assets/kits/manifest.json) so the AI director selects by ID only.
 - All AI provider calls must go through `src/ai/director.js`. Never call the AI provider directly from game/loop, engine, or UI code.
+- The game honors `IMAGE_TEXT_API_FORMAT` (currently: `openai`), `IMAGE_TEXT_BASE_URL`, `IMAGE_TEXT_MODEL`, and `IMAGE_TEXT_API_KEY` — see `src/ai/openaiProvider.js`. When unset (or the format is unsupported), the game falls back to `src/ai/mockProvider.js` so it still runs offline / without secrets.
 - Use a subagent when one is available and appropriate for the task.
 - Before handoff, create a commit after the required verification passes.
 - If `gh` is installed and authenticated, do not run tests locally. Push the commit to GitHub, run the relevant tests through the triggered GitHub workflow, and confirm the workflow passes before handoff.

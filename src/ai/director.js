@@ -5,9 +5,10 @@
 // or editing provider.js.
 
 import { mockProvider } from './mockProvider.js';
+import detectOpenAIProvider from './openaiProvider.js';
 
 function getProvider() {
-  return window.LIFESPEAK_AI || mockProvider;
+  return window.LIFESPEAK_AI || detectOpenAIProvider() || mockProvider;
 }
 
 // ---- prompt assembly -------------------------------------------------
