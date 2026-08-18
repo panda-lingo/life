@@ -89,9 +89,10 @@ test.describe('LifeSpeak smoke', () => {
     await picker.locator('button.place').first().click();
 
     // NPC opens, then the loop awaits a STT session that degrades to the
-    // typed reply path — assert the dialogue HUD renders.
+    // typed reply path — assert the dialogue HUD renders. Real AI + Places
+    // involves two backend AI calls; allow up to 45s for gateway latency bursts.
     await expect(page.locator('#hud')).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('#hud input')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('#hud input')).toBeVisible({ timeout: 45_000 });
 
     // Mock-maps fallback: the backend answers 404 for /api/maps/config when
     // GOOGLE_MAPS_API_KEY is unset (documented failure mode → mock places).

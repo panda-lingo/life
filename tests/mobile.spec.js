@@ -83,7 +83,12 @@ test.describe('LifeSpeak mobile (redroid)', () => {
 
     await picker.locator('button.place').first().tap();
     await expect(page.locator('#hud')).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('#hud input')).toBeVisible({ timeout: 20_000 });
+    // In CI with real AI + Google Maps configured, advancing through the
+    // explore beat involves two backend AI calls (directNextScenario + npcTurn
+    // opening line) before the headless STT synthetic stuck timer (2s) degrades
+    // to the typed reply input. Upstream gateway latency bursts can push this
+    // step beyond 20s, so allow up to 45s for the input to appear.
+    await expect(page.locator('#hud input')).toBeVisible({ timeout: 45_000 });
 
     // Mock-maps fallback: the backend answers 404 for /api/maps/config when
     // GOOGLE_MAPS_API_KEY is unset (documented failure mode → mock places).
