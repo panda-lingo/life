@@ -70,10 +70,12 @@ test.describe('LifeSpeak mobile (redroid)', () => {
     await expect(status).toContainText(/Day 1/);
     await expect(status).toContainText(/💰/);
     await expect(status).toContainText(/⚡/);
-    // No horizontal overflow: the bar stays within the viewport width.
-    const box = await status.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box.width).toBeLessThanOrEqual(412);
+    // No horizontal overflow: the document never scrolls past the viewport.
+    const overflow = await page.evaluate(() => ({
+      scrollW: document.documentElement.scrollWidth,
+      clientW: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollW, 'page overflows viewport horizontally').toBeLessThanOrEqual(overflow.clientW);
   });
 
   test('explore mode: place picker tappable, dialogue HUD renders (mock maps)', async ({ page, request }) => {
