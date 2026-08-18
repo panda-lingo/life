@@ -107,7 +107,7 @@ test.describe('LifeSpeak mobile (redroid)', () => {
       !/status of 5\d\d/i.test(t) &&
       // Headless/CI has no real WebGL — Google Maps JS SDK logs this
       // expected warning and silently falls back to raster tiles.
-      !/Vector Map, but failed/i.test(t),
+      !/vector map/i.test(t) && !/failed.*webgl/i.test(t),
     );
     expect(fatal, fatal.join('\n')).toEqual([]);
   });

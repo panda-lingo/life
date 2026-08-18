@@ -28,7 +28,7 @@ test.describe('real AI provider (backend /api/ai/complete)', () => {
   test('backend /api/ai/complete proxies to OpenAI', async ({ request }) => {
     // The provider boundary lives at /api/ai/complete. Drive it directly so
     // any future provider swap (Bedrock, Azure, local Llama) keeps the same
-    // contract with the browser. Retry up to 3 attempts with 1s/2s backoff
+    // contract with the browser. Retry up to 5 attempts with 1s/2s/3s backoff
     // because upstream gateway bursts span ~25s — a single retry isn't
     // enough; the game itself degrades to mock on 5xx, so this test asserts
     // that the boundary yields a real OpenAI-compatible shape when the
