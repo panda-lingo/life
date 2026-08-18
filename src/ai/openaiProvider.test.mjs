@@ -34,12 +34,15 @@ test('real provider: skipped when IMAGE_TEXT_API_KEY missing', { skip: HAS_ENV &
 //      (gateway answers OK but generates nothing).
 //   2. HTTP 500 / context-deadline-exceeded — gateway bursts under load
 //      and surfaces "500 req failed 500 500 Internal Server Error" or
-//      a transport-layer timeout.
+//      a transport-layer timeout. Bursts can span several seconds.
 // Both flavors are upstream behavior, not provider-contract bugs. We exercise
-// the gateway contract here, not our parsing — so retry the REAL PROVIDER
-// CALL ONCE and accept any single attempt that produced text. 4xx (prompt
-// bug) and structural JSON errors still propagate, which is the desired
-// behavior: only the documented upstream-flake shapes get the retry.
+// the gateway contract here, not our parsing — so retry with exponential
+// backoff up to 2 extra attempts (1s, 2s) and accept any attempt that
+// produced text. A single retry is not enough: the observed burst window
+// routinely spans ~25s across two sequential slots. 4xx (prompt bug) and
+// structural JSON errors still propagate, which is the desired behavior:
+// only the documented upstream-flake shapes get the retry.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function withUpstreamRetry(fn) {
   const isRetryable = (err) => {
     if (!err) return false;
@@ -60,19 +63,26 @@ async function withUpstreamRetry(fn) {
   };
   const isDegenerate = (err) =>
     /degenerate completion/i.test(String(err?.message || err));
-  try {
-    return await fn();
-  } catch (err) {
-    const retryable = isRetryable(err) || isDegenerate(err);
-    if (!retryable) throw err;
-    // Classify for the log line so a reviewer can see the upstream failure mode.
-    const kind = err?.status ? `HTTP ${err.status}` : (err?.name || 'error');
-    console.warn(`[test] upstream flake (${kind}); retrying once: ${err?.message || err}`);
-    const text = await fn(); // may itself throw — let that propagate
-    const suffix = text ? '' : ' (upstream flaked twice — second attempt also empty)';
-    console.warn(`[test] second attempt completed${suffix}`);
-    return text;
+  let lastErr = null;
+  // attempts[0] runs immediately; attempts[1..] follow backoff [1s, 2s].
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt > 0) await sleep(1000 * attempt);
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const retryable = isRetryable(err) || isDegenerate(err);
+      if (!retryable) throw err;
+      // Classify for the log line so a reviewer can see the upstream failure mode.
+      const kind = err?.status ? `HTTP ${err.status}` : (err?.name || 'error');
+      if (attempt < 2) {
+        console.warn(`[test] upstream flake attempt=${attempt + 1} (${kind}); backing off ${1000 * (attempt + 1)}ms: ${err?.message || err}`);
+      }
+    }
   }
+  // All attempts failed with documented upstream-flake shapes — rethrow the
+  // last one so the test reports the real error.
+  throw lastErr;
 }
 
 test('openaiProvider: complete() returns text for a chat-only prompt', { skip: !HAS_ENV || !FORMAT_OK }, async () => {
