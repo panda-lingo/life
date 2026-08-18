@@ -107,7 +107,10 @@ test.describe('LifeSpeak smoke', () => {
       !/\/api\/maps\/config/i.test(t) &&
       !/status of 404/i.test(t) &&
       !/\/api\/ai\/complete/i.test(t) &&
-      !/status of 5\d\d/i.test(t),
+      !/status of 5\d\d/i.test(t) &&
+      // Headless/CI has no real WebGL — Google Maps JS SDK logs this
+      // expected warning and silently falls back to raster tiles.
+      !/Vector Map, but failed/i.test(t),
     );
     expect(fatal, fatal.join('\n')).toEqual([]);
   });
