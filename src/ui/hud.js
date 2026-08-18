@@ -3,6 +3,7 @@
 // an event before it reaches the game state.
 
 import { cefrEstimate } from '../data/learnerModel.js';
+import { clockString, isExhausted } from '../sim/world.js';
 
 let container = null;
 let state = {};
@@ -29,8 +30,29 @@ function ensureContainer() {
 
 function renderStatus() {
   const div = document.createElement('div');
-  div.style.opacity = '0.8';
-  div.textContent = `CEFR ${cefrEstimate({ cefrIndex: state.learnerCefrIndex ?? 1 })} · ${state.worldState?.stats?.trust ?? 0} trust`;
+  div.id = 'hud-status';
+  div.style.cssText = 'opacity:0.92; display:flex; flex-wrap:wrap; gap:6px 12px; font-size:13px;';
+  const trust = state.worldState?.stats?.trust ?? 0;
+  const vitals = state.world;
+  if (vitals) {
+    const p = vitals.player || {};
+    const cell = (label, val, color) => {
+      const s = document.createElement('span');
+      s.textContent = `${label} ${val}`;
+      s.style.color = color || '#fff';
+      return s;
+    };
+    const energyColor = isExhausted(vitals) ? '#ff6b6b' : (p.energy < 25 ? '#ffd166' : '#9be36f');
+    div.appendChild(cell('🕑', clockString(vitals), '#bdc3ff'));
+    div.appendChild(cell('💰', p.money ?? 0, '#9be36f'));
+    div.appendChild(cell('⚡', p.energy ?? 0, energyColor));
+    div.appendChild(cell('😊', p.mood ?? 0, '#ffd166'));
+    div.appendChild(cell('🔥', p.stress ?? 0, (p.stress ?? 0) > 60 ? '#ff6b6b' : '#fff'));
+    if (trust) div.appendChild(cell('🤝', trust, '#fff'));
+    div.appendChild(cell('CEFR', cefrEstimate({ cefrIndex: state.learnerCefrIndex ?? 1 }), '#bdc3ff'));
+  } else {
+    div.textContent = `CEFR ${cefrEstimate({ cefrIndex: state.learnerCefrIndex ?? 1 })} · ${trust} trust`;
+  }
   return div;
 }
 

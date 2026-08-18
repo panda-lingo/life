@@ -2,17 +2,20 @@
 // speech I/O, score every utterance, debrief on scenario end, persist
 // all events. This is the only file that talks to every other module.
 
-import { beats, eligibleBeats, applyEffects } from '../../scenarios/scenarios.js';
+import { beats, eligibleBeats, applyEffects as applyBeatEffects } from '../../scenarios/scenarios.js';
 import { initSession, emit, downloadExport } from '../data/eventlog.js';
 import {
   createLearnerModel, updateLanguage, updateSkills,
   fossilizedErrors, cefrEstimate,
 } from '../data/learnerModel.js';
+import { createWorld, tick, canAfford, snapshot, isExhausted } from '../sim/world.js';
+import { person } from '../sim/people.js';
 import {
   createRecognizer, speak, pickVoice, stopSpeaking, speechCapabilities,
 } from '../speech/speech.js';
 import {
   directNextScenario, composeScene, npcTurn, scoreUtterance, debriefScenario,
+  npcRelationshipDelta,
 } from '../ai/director.js';
 import { renderHUD, showChoice, showTextInput, showPlacePicker, clearHUDOverlays } from '../ui/hud.js';
 import { createExplorer, placeToBeat } from '../gmaps/maps.js';
@@ -23,6 +26,7 @@ let session = null;
 function createSession() {
   return {
     worldState: { flags: {}, stats: {} },
+    world: createWorld(),          // sim: time/money/energy/relationships/market
     learnerModel: createLearnerModel(),
     transcriptLog: [],           // { from: 'npc'|'player', text, ts }
     currentBeat: null,
@@ -68,15 +72,26 @@ export async function startGame(container) {
   s.stopLoop = e.loop(() => e.render());
 
   await renderHUD({
+    world: snapshot(s.world),
     onExit: () => emit('session.end', {}),
     onExport: () => downloadExport(),
     onCefr: () => cefrEstimate(s.learnerModel),
   });
+  await emit('world.tick', { clock: s.world.clock, player: s.world.player, reason: 'session-start' });
 
   // Drive the scenario graph until no eligible beats remain or the
   // session is aborted (e.g. user exits).
   while (!signal.aborted) {
-    const candidates = eligibleBeats(s.worldState).map((b) => ({
+    // Sim gate: filter beats the player cannot afford (energy/money/time) and,
+    // when exhausted, restrict to rest/sleep beats so the day can continue.
+    const eligible = eligibleBeats(s.worldState, beats);
+    const affordable = eligible.filter((b) => canAfford(s.world, b.cost || {}));
+    const filtered = isExhausted(s.world)
+      ? affordable.filter((b) => b.rest === true)
+      : affordable;
+    const pool = filtered.length ? filtered : eligible;
+
+    const candidates = pool.map((b) => ({
       id: b.id,
       framing: b.title,
       skillFocus: b.skillFocus,
@@ -141,8 +156,10 @@ export async function startExplore(container, { explorerFactory = createExplorer
   const chosen = await showPlacePicker(earliestPlaces, { signal });
   if (signal.aborted || !chosen) { explorer.dispose(); return; }
   clearHUDOverlays();
+  await renderHUD({ world: snapshot(s.world) });
   await emit('place.selected', {
     placeId: chosen.placeId, name: chosen.name, rating: chosen.rating,
+    world: snapshot(s.world),
   });
 
   const continued = await runNextBeat(s, {
@@ -190,7 +207,16 @@ async function runNextBeat(s, { signal, candidates, beatMap = beats }) {  const 
   s.currentBeat = beatMap[beatId];
   if (!s.currentBeat) return false;
 
-  await emit('beat.start', { beatId, framing, worldState: structuredClone(s.worldState) });
+  // Sim: apply the beat's cost (energy/money/time) up front, then snapshot.
+  const beat = s.currentBeat;
+  if (beat.cost) {
+    const r = tick(s.world, { kind: 'applyCost', cost: beat.cost });
+    s.world = r.world;
+    await emit('world.tick', { clock: s.world.clock, player: s.world.player, reason: `beat-cost:${beatId}` });
+  }
+
+  await emit('beat.start', { beatId, framing, worldState: structuredClone(s.worldState), world: snapshot(s.world) });
+  await renderHUD({ world: snapshot(s.world) });
 
   // 1. Compose + render the scene (only when a 3D engine is mounted —
   // explore mode renders the map instead and skips scene composition).
@@ -202,10 +228,13 @@ async function runNextBeat(s, { signal, candidates, beatMap = beats }) {  const 
     await emit('scene.composed', { beatId, composition });
   }
 
-  // 2. Opening line from the NPC.
+  // 2. Opening line from the NPC. Inject the beat NPC's sim relationship
+  // state (affection/mood) so the director's prompt reflects the world.
+  const npc = beat.npcs[0];
+  const simNpc = npc && s.world.people?.[npc.id] ? s.world.people[npc.id] : null;
   const opening = await npcTurn({
     beat: s.currentBeat,
-    npc: s.currentBeat.npcs[0],
+    npc: simNpc ? { ...npc, mood: simNpc.mood, affection: simNpc.affection } : npc,
     worldState: s.worldState,
     history: s.transcriptLog,
     learnerUtterance: '(scene opens)',
@@ -216,8 +245,22 @@ async function runNextBeat(s, { signal, candidates, beatMap = beats }) {  const 
   // 3. Walk the beat graph.
   await playDialogueSteps(s, { signal, beat: s.currentBeat });
 
+  // 4. Sim: apply the beat's effects (money/energy/mood/stat deltas) and
+  // score the relationship delta for the beat's NPC.
+  if (beat.effects || beat.stats || beat.flags) {
+    const eff = {
+      flags: beat.flags || beat.effects?.flags,
+      stats: beat.stats || beat.effects?.stats,
+    };
+    const r = tick(s.world, { kind: 'applyEffects', effects: eff });
+    s.world = r.world;
+    await emit('world.tick', { clock: s.world.clock, player: s.world.player, reason: `beat-effects:${beatId}` });
+  }
+  if (simNpc) await runRelationshipDelta(s, { npcId: npc.id, beatId });
+
   await emit('beat.end', { beatId });
   await runDebrief(s, { beatId });
+  await renderHUD({ world: snapshot(s.world) });
   return true;
 }
 
@@ -264,13 +307,31 @@ async function playDialogueSteps(s, { signal, beat }) {
 async function presentChoice(s, { signal, step }) {
   const chosen = await showChoice(step.options, { signal });
   if (!chosen) return;
-  // Merge effects back into the world state before the next NPC turn sees them.
-  const merged = applyEffects(s.worldState, chosen.effects || {});
+  // Merge effects back into the legacy worldState AND the sim world before the
+  // next NPC turn sees them. Sim effects route money/energy/mood to vitals.
+  const merged = applyBeatEffects(s.worldState, chosen.effects || {});
   s.worldState.flags = merged.flags;
   s.worldState.stats = merged.stats;
+  const r = tick(s.world, { kind: 'applyEffects', effects: chosen.effects || {} });
+  s.world = r.world;
   await emit('choice.made', {
     stepIndex: s.currentBeat.beats.indexOf(step),
     chosen,
+    world: snapshot(s.world),
+  });
+  await renderHUD({ world: snapshot(s.world) });
+}
+
+// Sim: score how this beat shifted the NPC's feelings toward the player.
+async function runRelationshipDelta(s, { npcId, beatId }) {
+  const p = person(s.world, npcId);
+  if (!p) return;
+  const delta = await npcRelationshipDelta({ npc: p, transcriptLog: s.transcriptLog });
+  const r = tick(s.world, { kind: 'relationshipDelta', npcId, delta });
+  s.world = r.world;
+  await emit('relationship.delta', {
+    npcId, affection: delta.affection, trust: delta.trust, evidence: delta.evidence,
+    beatId,
   });
 }
 
@@ -378,6 +439,8 @@ export const __test__ = {
   get worldState() { return session?.worldState; },
   get learnerModel() { return session?.learnerModel; },
   get transcriptLog() { return session?.transcriptLog; },
+  get world() { return session?.world; },
+  set world(w) { if (session) session.world = w; },
   runNextBeat,
   presentChoice,
   capturePlayerUtterance,

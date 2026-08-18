@@ -141,6 +141,7 @@ for f in src/engine/engine.js src/engine/props.js src/game/loop.js \
          src/data/eventlog.js src/data/learnerModel.js src/data/analytics.js \
          src/gmaps/maps.js \
          src/speech/speech.js src/ui/hud.js \
+         src/sim/world.js src/sim/people.js src/sim/market.js \
          scenarios/scenarios.js; do
   node --check "$f"
 done

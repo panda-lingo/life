@@ -38,6 +38,10 @@ any offline tool (pandas, duckdb, jq, Excel) can ingest.
 | `choice.made` | player picks a dialogue option | `stepIndex`, `chosen` (text + effects) |
 | `scenario.debrief` | scenario closes | `debrief {scores, evidence, nextTime}` |
 | `skill.updated` | learner model updates | `skill`, `newValue` |
+| `world.tick` | sim clock advances / day rolls | `clock {day,minute}`, `player` snapshot, `reason` |
+| `trade.made` | player buys/sells a good | `goodId`, `qty`, `unitPrice`, `from`, `to`, `amount` |
+| `relationship.delta` | NPC affection/trust shifts after a beat | `npcId`, `affection`, `trust`, `evidence` |
+| `vital.changed` | energy/health/mood/stress crosses a threshold | `vital`, `from`, `to` |
 
 ## Server-side persistence
 
@@ -72,3 +76,22 @@ Any JSONL file must be sufficient to answer:
 4. What did the learner actually say at each decision point?
 
 To make that possible, every scoring event embeds the full context (`transcript`, `worldState` snapshot) — not foreign keys that would require a live DB join.
+
+## Simulation state (wealth-flow reconstruction)
+
+The simulation core ([`docs/simulation.md`](simulation.md)) emits its own
+events so the JSONL export alone can reconstruct the player's day, wealth, and
+relationships without a live DB:
+
+- `world.tick` — full `clock` + `player` vitals snapshot every time the clock
+  advances (per beat) and on day rollover. Replaying these in order gives the
+  complete vital trajectory (energy/money/mood/stress over time).
+- `trade.made` — money-flow triple `from`/`to`/`amount` plus `unitPrice` and
+  `qty`, so a pandas/duckdb pass can sum net wealth flow player ⇄ market.
+- `relationship.delta` — per-NPC affection/trust after each beat, with
+  `evidence` (transcript-derived); reconstructs the relationship graph over time.
+- `vital.changed` — threshold crossings (energy hitting 0, mood crashing) for
+  alerting/analysis without diffing snapshots.
+
+Every simulation event embeds enough snapshot to be self-contained, matching
+the existing "no live DB join" contract.

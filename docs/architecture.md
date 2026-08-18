@@ -128,6 +128,29 @@ Two entry modes from the splash screen:
 | IndexedDB | quota exceeded | in-memory log + warning banner |
 | WebGL | context lost | canvas pause + retry button |
 
+## Simulation layer (time / money / energy / relationships / trade)
+
+The dialogue game is wrapped by a deterministic life-simulation core defined in
+[`docs/simulation.md`](simulation.md). The desired end state is a single
+`world` object the whole game reads and mutates through pure functions:
+
+- `src/sim/world.js` — clock (minutes/day), player vitals (money, energy,
+  health, mood, stress), flags/stats; `createWorld()`, `advanceTime(w, mins)`,
+  `applyCost(w, cost)`, `canAfford(w, cost)`, `tick(w, action)`.
+- `src/sim/people.js` — family + friends + colleagues as a directed
+  relationship graph (affection -100..100, trust 0..100); gates beats.
+- `src/sim/market.js` — goods with supply/demand pricing; `buy`/`sell` move
+  money between player and market (Wealth Flow Simulation).
+
+`loop.js` owns the only `world` instance per session. The AI director selects
+beats and writes dialogue but **never mutates the world directly** — all
+transitions go through `world.tick()`. Two new director contract functions
+(`directTrade`, `npcRelationshipDelta`) reuse the existing `complete()`
+boundary and fall back to the deterministic mock when the AI provider is
+absent. World snapshots are emitted as `world.tick` / `trade.made` /
+`relationship.delta` / `vital.changed` events (see `docs/data-model.md`),
+keeping IndexedDB as the offline source of truth.
+
 ## Module contracts
 
 - `net/backend.js`: `getBackend()` (memoized health probe), `backendAvailable()`,
@@ -156,4 +179,11 @@ Two entry modes from the splash screen:
   `showTextInput({placeholder})`, `showPlacePicker(places)`, `clearHUDOverlays()`
 - `loop.js`: `startGame(container)` (classic 3D mode; lazy-imports `engine.js`)
   and `startExplore(container)` (maps mode; never loads three.js) — the only
-  file that talks to every other module
+  file that talks to every other module. Owns the session `world` (see
+  `docs/simulation.md`); advances time/energy/money/relationships per beat.
+- `sim/world.js`: `createWorld()`, `advanceTime(w, mins)`, `applyCost(w, cost)`,
+  `canAfford(w, cost)`, `tick(w, action)`, `snapshot(w)` — pure, no I/O.
+- `sim/people.js`: `createPeople()`, `person(w, id)`, `affection(w, id)`,
+  `trust(w, id)`, `applyRelationshipDelta(w, npcId, delta)` — pure, no I/O.
+- `sim/market.js`: `createMarket()`, `goods(w)`, `price(w, goodId)`,
+  `buy(w, goodId, qty)`, `sell(w, goodId, qty)` — pure, no I/O.

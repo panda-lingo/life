@@ -58,6 +58,24 @@ test.describe('LifeSpeak mobile (redroid)', () => {
     expect(fatal, fatal.join('\n')).toEqual([]);
   });
 
+  test('sim status bar renders and wraps responsively at mobile width', async ({ page }) => {
+    // The sim status bar (docs/simulation.md) uses flex-wrap so time/money/
+    // energy/mood/stress fit a 412px redroid viewport without overflow.
+    await page.goto('/');
+    await page.locator('#start').tap();
+    await expect(page.locator('#splash')).toHaveCount(0, { timeout: 5000 });
+
+    const status = page.locator('#hud-status');
+    await expect(status).toBeVisible({ timeout: 10_000 });
+    await expect(status).toContainText(/Day 1/);
+    await expect(status).toContainText(/💰/);
+    await expect(status).toContainText(/⚡/);
+    // No horizontal overflow: the bar stays within the viewport width.
+    const box = await status.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box.width).toBeLessThanOrEqual(412);
+  });
+
   test('explore mode: place picker tappable, dialogue HUD renders (mock maps)', async ({ page, request }) => {
     // Same flow as the desktop explore test, exercised at the redroid
     // viewport. Mock maps (no API key) renders 3 places; real maps (key set

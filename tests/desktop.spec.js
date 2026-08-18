@@ -66,6 +66,24 @@ test.describe('LifeSpeak smoke', () => {
     expect(fatal, fatal.join('\n')).toEqual([]);
   });
 
+  test('sim status bar renders time/money/energy when game starts', async ({ page }) => {
+    // The simulation core (docs/simulation.md) drives a HUD status bar that
+    // shows the clock, money, energy, mood, stress. Assert it mounts on Start
+    // with the seeded Day 1 values — desktop viewport.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+    await page.locator('#start').click();
+    await expect(page.locator('#splash')).toHaveCount(0, { timeout: 5000 });
+
+    const status = page.locator('#hud-status');
+    await expect(status).toBeVisible({ timeout: 10_000 });
+    // Clock shows "Day 1" and a time; money/energy icons present.
+    await expect(status).toContainText(/Day 1/);
+    await expect(status).toContainText(/💰/);
+    await expect(status).toContainText(/⚡/);
+    await expect(status).toContainText(/CEFR/);
+  });
+
   test('explore mode: place picker → café dialogue (mock maps)', async ({ page, request }) => {
     // Probe backend maps configuration: when GOOGLE_MAPS_API_KEY is unset the
     // boundary falls back to the deterministic mock (3 places); when set the

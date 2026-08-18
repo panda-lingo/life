@@ -177,3 +177,47 @@ evidence. End with one concrete "next time try" suggestion.`,
   // -> { "scores": {"conflict": x, "time": y, "collaboration": z},
   //      "evidence": ["quote -> why", ...], "nextTime": "..." }
 }
+
+// ---- 6. Trade advice (market) -----------------------------------------
+// The player asks whether to buy/sell; the director reasons about the good's
+// supply/demand and the player's money. Pure advisory — world.js applies the
+// actual trade. Falls back to mock when the AI provider is absent.
+export async function directTrade({ world, goodId, action, qty }) {
+  return call(
+    `You are a market advisor in a life-simulation game. Given the good's
+supply/demand and the player's money, advise whether to proceed with the
+${action} of ${qty} unit(s). Keep it under 30 words and end with a clear
+"proceed" or "hold" recommendation grounded in the numbers.`,
+    'Advise on this trade.',
+    { world: worldSummary(world), goodId, action, qty },
+  );
+  // -> { "advice": "...", "recommendation": "proceed"|"hold", "reason": "..." }
+}
+
+// ---- 7. Relationship delta after a beat --------------------------------
+// Scores the transcript into an affection/trust delta for the beat's NPC.
+// The loop applies the delta via people.applyRelationshipDelta (weighted by
+// relation). Falls back to mock keyword heuristics when offline.
+export async function npcRelationshipDelta({ npc, transcriptLog }) {
+  return call(
+    `You are a relationship assessor in a life-simulation game. Given the NPC
+(${npc.name}, ${npc.relation}, current affection ${npc.affection}, trust
+${npc.trust}) and the dialogue transcript, score how this conversation shifted
+their feelings toward the player. Affection: -20..+20 per beat (warmth, felt
+heard, kindness, gift-giving). Trust: -15..+15 (kept promises, honesty,
+reliability). Cite the player's words as evidence.`,
+    'Score the relationship delta.',
+    { npc, transcript: transcriptLog.map((t) => t.text || t) },
+  );
+  // -> { "affection": n, "trust": n, "evidence": "..." }
+}
+
+// Compact world view for prompts (avoids dumping the full people graph).
+function worldSummary(world) {
+  return {
+    clock: world.clock,
+    player: world.player,
+    flags: world.flags,
+    stats: world.stats,
+  };
+}

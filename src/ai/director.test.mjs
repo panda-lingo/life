@@ -179,3 +179,63 @@ test('call: mock provider is itself the chosen provider — unchanged behavior',
   const out = await npcTurn({ beat: fakeBeat, npc: fakeBeat.npcs[0], worldState: {}, history: [], learnerUtterance: 'hello', targetLevel: 'B1' });
   assert.equal(out.text, 'direct mock');
 });
+
+// ---- new sim contract functions: directTrade, npcRelationshipDelta -------
+import { directTrade, npcRelationshipDelta } from './director.js';
+import { mockProvider } from './mockProvider.js';
+import { createWorld } from '../sim/world.js';
+
+test('npcRelationshipDelta: returns affection/trust via the provider boundary', async () => {
+  _setProviderImplsForTests({
+    probeBackend: async () => null,
+    detectOpenAI: async () => null,
+    mock: { name: 'mock', complete: async () => '{"affection":8,"trust":5,"evidence":"stub"}' },
+  });
+  const npc = { name: 'Elena', relation: 'family', affection: 60, trust: 70 };
+  const out = await npcRelationshipDelta({ npc, transcriptLog: [{ from: 'player', text: 'thank you mom' }] });
+  assert.equal(out.affection, 8);
+  assert.equal(out.trust, 5);
+});
+
+test('directTrade: returns a proceed/hold recommendation via the provider boundary', async () => {
+  _setProviderImplsForTests({
+    probeBackend: async () => null,
+    detectOpenAI: async () => null,
+    mock: { name: 'mock', complete: async () => '{"advice":"buy","recommendation":"proceed","reason":"supply>demand"}' },
+  });
+  const out = await directTrade({ world: createWorld(), goodId: 'coffee', action: 'buy', qty: 2 });
+  assert.equal(out.recommendation, 'proceed');
+});
+
+// ---- mock provider: the new task handlers behave deterministically ------
+test('mock: directTrade handler recommends hold when demand>supply', async () => {
+  const world = createWorld();
+  // gadget: demand 8, supply 10 -> ratio <1 -> proceed; coffee demand 40 supply 50 -> proceed.
+  // Flip coffee demand above supply to exercise the hold branch.
+  world.market.coffee.demand = 100; world.market.coffee.supply = 10;
+  const prompt = [
+    'system', '', 'CONTEXT (JSON):', JSON.stringify({ world: world, goodId: 'coffee', action: 'buy', qty: 1 }), '',
+    'TASK: Advise on this trade.', '', 'Respond with VALID JSON only.',
+  ].join('\n');
+  const raw = await mockProvider.complete({ prompt });
+  const out = JSON.parse(raw);
+  assert.equal(out.recommendation, 'hold');
+});
+
+test('mock: npcRelationshipDelta handler scores warm/mean transcripts', async () => {
+  const warm = [
+    'system', '', 'CONTEXT (JSON):', JSON.stringify({ npc: { name: 'Elena' }, transcript: ['thank you so much mom, I appreciate you'] }), '',
+    'TASK: Score the relationship delta.', '', 'Respond with VALID JSON only.',
+  ].join('\n');
+  const warmOut = JSON.parse(await mockProvider.complete({ prompt: warm }));
+  assert.ok(warmOut.affection > 0, 'warm transcript raises affection');
+  assert.ok(warmOut.trust >= 0);
+
+  const mean = [
+    'system', '', 'CONTEXT (JSON):', JSON.stringify({ npc: { name: 'Luca' }, transcript: ['shut up you stupid liar'] }), '',
+    'TASK: Score the relationship delta.', '', 'Respond with VALID JSON only.',
+  ].join('\n');
+  const meanOut = JSON.parse(await mockProvider.complete({ prompt: mean }));
+  assert.ok(meanOut.affection < 0, 'mean transcript lowers affection');
+  assert.ok(meanOut.trust < 0, 'mean transcript lowers trust');
+});

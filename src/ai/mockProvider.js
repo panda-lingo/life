@@ -119,6 +119,41 @@ export const mockProvider = {
       });
     }
 
+    if (task.startsWith('Advise on this trade')) {
+      const good = (ctx.world?.market || {})[ctx.goodId];
+      const money = ctx.world?.player?.money ?? 0;
+      if (ctx.action === 'buy' && good) {
+        const ratio = good.demand / good.supply;
+        const recommend = ratio < 1 ? 'proceed' : 'hold';
+        return JSON.stringify({
+          advice: `mock: ${ctx.goodId} demand/supply ${ratio.toFixed(2)}, you have ${money}.`,
+          recommendation: recommend,
+          reason: 'mock: buy when supply exceeds demand',
+        });
+      }
+      return JSON.stringify({
+        advice: 'mock: sell to rebalance supply.',
+        recommendation: 'proceed',
+        reason: 'mock: selling raises liquidity',
+      });
+    }
+
+    if (task.startsWith('Score the relationship delta')) {
+      const npc = ctx.npc || {};
+      const text = (ctx.transcript || []).join(' ').toLowerCase();
+      let affection = 0;
+      let trust = 0;
+      if (countHits(text, ['sorry', 'thank', 'appreciate', 'love', 'care']) >= 1) affection += 5;
+      if (countHits(text, ['promise', 'will', 'tomorrow', 'commit', 'sure']) >= 1) trust += 4;
+      if (/liar|hate|stupid|shut up/i.test(text)) { affection -= 8; trust -= 6; }
+      if (countHits(text, CONFLICT_WORDS) >= 2) affection += 3;
+      return JSON.stringify({
+        affection: clamp(affection, -20, 20),
+        trust: clamp(trust, -15, 15),
+        evidence: `mock: keyword scan of transcript with ${npc.name || 'NPC'}`,
+      });
+    }
+
     return JSON.stringify({ error: 'mock: unknown task', task });
   },
 };
