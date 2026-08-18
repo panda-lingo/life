@@ -28,21 +28,49 @@ test('real provider: skipped when IMAGE_TEXT_API_KEY missing', { skip: HAS_ENV &
   assert.ok(true, 'skipping real-provider tests');
 });
 
-// Degenerate-200 tolerance: newapi-style gateways occasionally answer HTTP 200
-// with {"choices":null,...,"completion_tokens":0} — a successful status but no
-// generated text (observed on Qwen3.5 behind the dev gateway). The assertion
-// being exercised is the upstream gateway's contract, not our parsing (our
-// `?? ''` handling is itself tested), so retry the REAL PROVIDER CALL ONCE and
-// accept any single attempt that produced text. 5xx responses keep throwing
-// through both attempts (the provider surfaces those as errors), which is the
-// desired behavior: only the degenerate-200 variant gets the retry.
-async function withDegenerateRetry(fn) {
+// Upstream-flake tolerance: newapi-style gateways behind the dev AI service
+// flake in two observed ways:
+//   1. Degenerate HTTP 200 — `{"choices":null,...,"completion_tokens":0}`
+//      (gateway answers OK but generates nothing).
+//   2. HTTP 500 / context-deadline-exceeded — gateway bursts under load
+//      and surfaces "500 req failed 500 500 Internal Server Error" or
+//      a transport-layer timeout.
+// Both flavors are upstream behavior, not provider-contract bugs. We exercise
+// the gateway contract here, not our parsing — so retry the REAL PROVIDER
+// CALL ONCE and accept any single attempt that produced text. 4xx (prompt
+// bug) and structural JSON errors still propagate, which is the desired
+// behavior: only the documented upstream-flake shapes get the retry.
+async function withUpstreamRetry(fn) {
+  const isRetryable = (err) => {
+    if (!err) return false;
+    // OpenAI SDK attaches `err.status` for HTTP-shaped errors (5xx lands
+    // here as InternalServerError, 4xx as BadRequestError etc.) and leaves
+    // it undefined for transport-layer failures (APIConnectionError,
+    // APIConnectionTimeoutError, AbortError).
+    const status = err?.status;
+    if (typeof status === 'number' && status >= 500) return true;
+    // Transport-layer timeouts / EOFs surface as raw errors with no status.
+    const msg = String(err?.message || err);
+    if (/context deadline exceeded/i.test(msg)) return true;
+    if (/Timeout exceeded/i.test(msg)) return true;
+    if (/socket hang up|ECONNRESET|ECONNREFUSED|EAI_AGAIN/i.test(msg)) return true;
+    if (/Request timed out\./i.test(msg)) return true;
+    if (/Connection error\./i.test(msg)) return true;
+    return false;
+  };
+  const isDegenerate = (err) =>
+    /degenerate completion/i.test(String(err?.message || err));
   try {
     return await fn();
   } catch (err) {
+    const retryable = isRetryable(err) || isDegenerate(err);
+    if (!retryable) throw err;
+    // Classify for the log line so a reviewer can see the upstream failure mode.
+    const kind = err?.status ? `HTTP ${err.status}` : (err?.name || 'error');
+    console.warn(`[test] upstream flake (${kind}); retrying once: ${err?.message || err}`);
     const text = await fn(); // may itself throw — let that propagate
-    const suffix = text ? '' : ' (gateway returned a degenerate 200 twice)';
-    console.warn(`[test] first attempt failed (${err?.message || err}); second attempt succeeded${suffix}`);
+    const suffix = text ? '' : ' (upstream flaked twice — second attempt also empty)';
+    console.warn(`[test] second attempt completed${suffix}`);
     return text;
   }
 }
@@ -53,7 +81,7 @@ test('openaiProvider: complete() returns text for a chat-only prompt', { skip: !
     model: process.env.IMAGE_TEXT_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini',
     baseURL: process.env.IMAGE_TEXT_BASE_URL || process.env.OPENAI_BASE_URL,
   });
-  const text = await withDegenerateRetry(() =>
+  const text = await withUpstreamRetry(() =>
     p.complete({
       system: 'Reply with a single JSON object only. No prose.',
       prompt: 'Output exactly: {"ping":"pong","n":1}',
@@ -93,7 +121,7 @@ test('openaiAsDirector: director-shaped prompt flows through system channel', { 
     '',
     'Respond with VALID JSON only. No markdown fences, no commentary.',
   ].join('\n');
-  const raw = await p.complete({ prompt });
+  const raw = await withUpstreamRetry(() => p.complete({ prompt }));
   const parsed = JSON.parse(raw);
   // Reasoning models may answer with any key (choice, weather, answer, etc.)
   // or even nested. Accept any parsed object that CONTAINS one of the

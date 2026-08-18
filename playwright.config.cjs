@@ -16,6 +16,12 @@ module.exports = defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
+  // The explore-mode e2e test waits up to 45s on `#hud input` because two
+  // sequential backend AI calls + headless STT degradation can push the
+  // total time well past the Playwright default of 30s. Raise the global
+  // timeout so the enclosing test has headroom for that locator assertion
+  // (a locator timeout cannot exceed its parent test timeout).
+  timeout: process.env.CI ? 90_000 : 30_000,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   outputDir: './test-results',
   use: {

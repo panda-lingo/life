@@ -172,3 +172,17 @@ The `.github/workflows/ci.yml` workflow runs on every push / PR:
    built and pushed to `ghcr.io/<repo>` on `main` / `v*` tags; load-only on PRs.
 
 The workflow honors `PUBLISH_IMAGE` so PRs only load, not push.
+
+### e2e timeout tuning
+
+The desktop and mobile explore-mode tests wait up to 45s on `#hud input`
+because advancing through a place-driven dialogue beat invokes two
+sequential backend AI calls (`directNextScenario` + `npcTurn` opening
+line) plus the headless STT synthetic-stuck timer (2s) that degrades
+to the typed-reply path. Under upstream AI gateway latency bursts that
+chain can easily exceed 30s, which is Playwright's default test
+timeout. To give the 45s locator assertion headroom, `playwright.config.cjs`
+raises the global test timeout to **90s in CI** (30s locally). Locator
+timeouts are bounded by their enclosing test timeout — raising only the
+locator's `timeout` flag without raising the test timeout has no effect,
+which is why this lives at the config level rather than per-test.
