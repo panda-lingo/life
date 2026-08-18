@@ -1,11 +1,13 @@
 import { test, expect } from '@playwright/test';
 
 // Backend boundary e2e: runs against the containerized game (Docker image in
-// CI). The server runs with only GOOGLE_MAPS_API_KEY unset in CI, so maps
-// config answers 404 and explore mode falls back to the deterministic mock.
-// These specs drive the same-origin /api/* surface directly via
-// `page.request`, then verify the page works end-to-end without any AI or
-// Maps secrets present.
+// CI). CI may export GOOGLE_MAPS_API_KEY / GOOGLE_MAPS_MAP_ID into the
+// container when the GitHub secret/var are set — in that case maps config
+// answers 200 and live Places is used; otherwise the container runs without
+// secrets, maps config answers 404, and explore mode falls back to the
+// deterministic mock. These specs drive the same-origin /api/* surface
+// directly via `page.request`, then verify the page works end-to-end in
+// either configuration.
 //
 // The same assertions run on desktop and mobile viewports (mobile project
 // narrows the viewport only — the API surface is viewport-agnostic).
@@ -60,16 +62,25 @@ test.describe('backend boundary', () => {
     expect(got.map((e) => e.id).sort()).toEqual(events.map((e) => e.id).sort());
   });
 
-  test('page boots with no secrets and reaches explore mock mode', async ({ page }) => {
+  test('page boots with no secrets and reaches explore mock mode', async ({ page, request }) => {
+    // CI may run with or without GOOGLE_MAPS_API_KEY / GOOGLE_MAPS_MAP_ID
+    // exported into the container. Probe the boundary and assert the place
+    // picker accordingly: 3 canned mock places on 404, ≥1 real Places on 200.
     await page.goto('/');
-    // The game should render its splash even though the backend reports
-    // ai=false / maps=false — both features degrade to deterministic mocks.
+    const mapsCfg = await request.get('/api/maps/config');
+    const realMaps = mapsCfg.status() === 200;
+    // The game should render its splash either way — both paths degrade to
+    // a usable picker (real Places or deterministic mock).
     await expect(page.locator('#splash')).toBeVisible();
 
     await page.locator('#explore').click();
     await expect(page.locator('#splash')).toHaveCount(0, { timeout: 5000 });
-    // Mock maps mode renders the three canned places.
-    await expect(page.locator('#hud-place-picker')).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('#hud-place-picker button.place')).toHaveCount(3);
+    const picker = page.locator('#hud-place-picker');
+    await expect(picker).toBeVisible({ timeout: 10_000 });
+    if (realMaps) {
+      await expect(picker.locator('button.place')).not.toHaveCount(0);
+    } else {
+      await expect(picker.locator('button.place')).toHaveCount(3);
+    }
   });
 });

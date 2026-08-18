@@ -58,17 +58,23 @@ test.describe('LifeSpeak mobile (redroid)', () => {
     expect(fatal, fatal.join('\n')).toEqual([]);
   });
 
-  test('explore mode: place picker tappable, dialogue HUD renders (mock maps)', async ({ page }) => {
+  test('explore mode: place picker tappable, dialogue HUD renders (mock maps)', async ({ page, request }) => {
     // Same flow as the desktop explore test, exercised at the redroid
-    // viewport: mock maps mode (no API key in CI), tap needs to hit the
-    // 44px-tall place buttons.
+    // viewport. Mock maps (no API key) renders 3 places; real maps (key set
+    // in CI) renders >=1 — both paths must work, tap targets must hit 44px.
     await page.goto('/');
+    const mapsCfg = await request.get('/api/maps/config');
+    const realMaps = mapsCfg.status() === 200;
     await page.locator('#explore').tap();
     await expect(page.locator('#splash')).toHaveCount(0, { timeout: 5000 });
 
     const picker = page.locator('#hud-place-picker');
     await expect(picker).toBeVisible({ timeout: 10_000 });
-    await expect(picker.locator('button.place')).toHaveCount(3);
+    if (realMaps) {
+      await expect(picker.locator('button.place')).not.toHaveCount(0);
+    } else {
+      await expect(picker.locator('button.place')).toHaveCount(3);
+    }
 
     // Tap target: every place button meets the 44px minimum.
     const box = await picker.locator('button.place').first().boundingBox();

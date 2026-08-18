@@ -73,8 +73,8 @@ Maps configuration resolution order (first hit wins):
 
 All are optional — nothing needs configuring to play:
 - **No key anywhere** → deterministic *mock mode*: a canned center and three mock
-  places (`The Central Perk Café` etc.) appear. This is the default for local
-  dev and CI, and all e2e/integration coverage runs against it.
+  places (`The Central Perk Café` etc.) appear. Mock mode is the default for
+  local dev without secrets.
 - **Key found** → the Maps JS API loads with the Places library; geolocation
   permission is best-effort (denied → fallback center, Places search still
   runs). All Maps traffic goes through `src/gmaps/maps.js`, which logs every
@@ -82,6 +82,13 @@ All are optional — nothing needs configuring to play:
   reconstruction) per the project HTTP-logging constraint. If a live search
   returns zero places (ZERO_RESULTS / quota errors), the HUD says so and the
   page returns to the splash — the place picker never renders empty.
+
+CI e2e may run against either mode: the workflow injects `GOOGLE_MAPS_API_KEY`
+and `GOOGLE_MAPS_MAP_ID` when the GitHub secret/var are set, otherwise the
+container runs without them and the backend answers `404` for
+`/api/maps/config`. Playwright specs probe `/api/maps/config` first and expect
+**3 mock places** on `404` or **≥1 real place** on `200`, so the same suite
+passes with or without secrets.
 
 ## Mobile (same Wi-Fi)
 

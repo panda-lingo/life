@@ -66,18 +66,26 @@ test.describe('LifeSpeak smoke', () => {
     expect(fatal, fatal.join('\n')).toEqual([]);
   });
 
-  test('explore mode: place picker → café dialogue (mock maps)', async ({ page }) => {
-    // No GOOGLE_MAPS_API_KEY in CI: maps boundary falls back to deterministic
-    // mock mode with 3 canned places. Drive the real user path: click
-    // Explore, pick the café, advance one dialogue turn via the text-input
-    // fallback (no SpeechRecognition in headless Chromium).
+  test('explore mode: place picker → café dialogue (mock maps)', async ({ page, request }) => {
+    // Probe backend maps configuration: when GOOGLE_MAPS_API_KEY is unset the
+    // boundary falls back to the deterministic mock (3 places); when set the
+    // Maps JS SDK loads live Places (>= 1). Drive the real user path: click
+    // Explore, pick the first place, advance one dialogue turn via the
+    // text-input fallback (no SpeechRecognition in headless Chromium).
     await page.goto('/');
+    const mapsCfg = await request.get('/api/maps/config');
+    const realMaps = mapsCfg.status() === 200;
+
     await page.locator('#explore').click();
     await expect(page.locator('#splash')).toHaveCount(0, { timeout: 5000 });
 
     const picker = page.locator('#hud-place-picker');
     await expect(picker).toBeVisible({ timeout: 10_000 });
-    await expect(picker.locator('button.place')).toHaveCount(3);
+    if (realMaps) {
+      await expect(picker.locator('button.place')).not.toHaveCount(0);
+    } else {
+      await expect(picker.locator('button.place')).toHaveCount(3);
+    }
     await picker.locator('button.place').first().click();
 
     // NPC opens, then the loop awaits a STT session that degrades to the

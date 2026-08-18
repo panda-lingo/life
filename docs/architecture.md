@@ -121,7 +121,8 @@ Two entry modes from the splash screen:
 | Backend server | down / unreachable (static hosting, offline) | director detects via `/api/healthz` and skips the server provider; maps falls back to window/env/mock; event mirroring queues and retries — game is fully playable |
 | AI provider | network down / no key (server answers 503) | deterministic mock provider |
 | Backend AI provider | 5xx mid-session (upstream gateway overload/EOF, server 502 "upstream unreachable") | `director.call()` catches the backend throw, logs a masked line with the provider name + `err.status`, and completes the turn with the mock for this call. No retry — retry multiplies pressure on a known-flaky upstream and the mock is deterministic & cheap. 4xx (prompt bug) still throws so the caller sees it |
-| Google Maps | no key (server answers 404) / script blocked / offline | deterministic mock (canned Soho places) |
+| Google Maps | backend has key (200), real Places API returns ≥1 place | up to 10 real places; picker renders whatever count Google returns |
+| Google Maps | no key (server answers 404) / script blocked / offline | deterministic mock (3 canned Soho places) |
 | Google Maps | nearby search returns no places (ZERO_RESULTS / quota) | in-HUD "no places" message + `explore.empty` event; no dead-end picker |
 | IndexedDB | quota exceeded | in-memory log + warning banner |
 | WebGL | context lost | canvas pause + retry button |
