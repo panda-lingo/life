@@ -178,7 +178,15 @@ test('api: healthz reports feature configuration', async () => {
   const events = { append: () => {}, list: () => [] };
   const res = await apiCall({ path: '/api/healthz', config, events });
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body, { ok: true, ai: false, maps: false });
+  assert.deepEqual(res.body, { ok: true, ai: false, maps: false, mcp: false });
+});
+
+test('api: healthz reports mcp=true when TAVILY_API_KEY set', async () => {
+  const config = makeConfig({ TAVILY_API_KEY: 'tvly-test' });
+  const events = { append: () => {}, list: () => [] };
+  const res = await apiCall({ path: '/api/healthz', config, events });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.mcp, true);
 });
 
 test('api: maps/config 404 without key, 200 with key', async () => {
@@ -323,6 +331,199 @@ test('api: unknown route 404s', async () => {
     events: { append: () => {}, list: () => [] },
   });
   assert.equal(res.statusCode, 404);
+});
+
+// ---------- MCP integration (via api.js dispatch) --------------------------
+// Asserts /api/ai/complete and /api/mcp wire together end-to-end through
+// handleApi without booting a real server.
+
+test('api: mcp/tools manifest returns empty enabled list when no keys', async () => {
+  const res = await apiCall({
+    path: '/api/mcp/tools',
+    config: makeConfig({}),
+    events: { append: () => {}, list: () => [] },
+  });
+  assert.equal(res.statusCode, 200);
+  const byId = Object.fromEntries(res.body.tools.map((t) => [t.id, t]));
+  assert.equal(byId['fx.rate'].enabled, true);
+  assert.equal(byId['web.search'].enabled, false);
+});
+
+test('api: mcp/tools manifest enables web.* when TAVILY_API_KEY present', async () => {
+  const res = await apiCall({
+    path: '/api/mcp/tools',
+    config: makeConfig({ TAVILY_API_KEY: 'tvly-test' }),
+    events: { append: () => {}, list: () => [] },
+  });
+  assert.equal(res.statusCode, 200);
+  const byId = Object.fromEntries(res.body.tools.map((t) => [t.id, t]));
+  assert.equal(byId['web.search'].enabled, true);
+  assert.equal(byId['web.fetch'].enabled, true);
+});
+
+test('api: mcp invoke fx.rate via POST /api/mcp works without keys', async () => {
+  // fx.rate uses keyless er-api.com. With a fake fetch returning the upstream
+  // shape, the router should return { ok: true, value: { rate: ... } }.
+  const fetchImpl = async (url) => {
+    assert.match(url, /open\.er-api\.com/);
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        result: 'success',
+        base_code: 'USD',
+        rates: { EUR: 0.92 },
+        time_last_update_utc: 'Wed, 19 Aug 2026 00:00:01 GMT',
+      }),
+    };
+  };
+  const res = await apiCall({
+    path: '/api/mcp',
+    method: 'POST',
+    body: { id: 'r1', method: 'tools.invoke', params: { tool: 'fx.rate', args: { base: 'USD', target: 'EUR' } } },
+    config: makeConfig({}),
+    events: { append: () => {}, list: () => [] },
+    fetchImpl,
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.result.ok, true);
+  assert.equal(res.body.result.value.rate, 0.92);
+});
+
+test('api: ai/complete with tools=true forwards tool specs to upstream', async () => {
+  const config = makeConfig({
+    IMAGE_TEXT_API_FORMAT: 'openai',
+    IMAGE_TEXT_BASE_URL: 'https://gw.example/v1',
+    IMAGE_TEXT_MODEL: 'm1',
+    IMAGE_TEXT_API_KEY: 'sk-secret',
+    TAVILY_API_KEY: 'tvly-test',
+  });
+  let firstBody = null;
+  const fetchImpl = async (url, init) => {
+    if (!firstBody) {
+      firstBody = JSON.parse(init.body);
+    }
+    // First call: model asks for fx.rate tool.
+    // Second call: model returns final content.
+    if (url.includes('/chat/completions')) {
+      const body = JSON.parse(init.body);
+      const hasToolMsg = body.messages.some((m) => m.role === 'tool');
+      if (!hasToolMsg) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            choices: [{
+              message: {
+                role: 'assistant',
+                content: null,
+                tool_calls: [{
+                  id: 'call_1',
+                  type: 'function',
+                  function: {
+                    name: 'fx_rate',
+                    arguments: JSON.stringify({ base: 'USD', target: 'EUR' }),
+                  },
+                }],
+              },
+            }],
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          choices: [{ message: { role: 'assistant', content: '{"final":"with tool data"}' } }],
+        }),
+      };
+    }
+    if (url.includes('open.er-api.com')) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ result: 'success', rates: { EUR: 0.92 } }),
+      };
+    }
+    throw new Error(`unexpected fetch to ${url}`);
+  };
+  const res = await apiCall({
+    path: '/api/ai/complete',
+    method: 'POST',
+    body: { prompt: 'Tell me about EUR', tools: true },
+    config,
+    events: { append: () => {}, list: () => [] },
+    fetchImpl,
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.text, '{"final":"with tool data"}');
+  // The first chat-completions call must include `tools`.
+  assert.ok(Array.isArray(firstBody.tools), 'tools field present');
+  assert.ok(firstBody.tools.length > 0, 'at least one tool spec attached');
+  // response_format should be omitted when tools are present (OpenAI constraint).
+  assert.equal(firstBody.response_format, undefined);
+});
+
+test('api: ai/complete without tools flag sends no tools (backward compat)', async () => {
+  const config = makeConfig({
+    IMAGE_TEXT_API_FORMAT: 'openai',
+    IMAGE_TEXT_BASE_URL: 'https://gw.example/v1',
+    IMAGE_TEXT_MODEL: 'm1',
+    IMAGE_TEXT_API_KEY: 'sk-secret',
+    TAVILY_API_KEY: 'tvly-test',
+  });
+  let sentBody = null;
+  const fetchImpl = async (url, init) => {
+    sentBody = JSON.parse(init.body);
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        choices: [{ message: { content: '{"plain":"no tools"}' } }],
+      }),
+    };
+  };
+  const res = await apiCall({
+    path: '/api/ai/complete',
+    method: 'POST',
+    body: { prompt: 'hi' },
+    config,
+    events: { append: () => {}, list: () => [] },
+    fetchImpl,
+  });
+  assert.equal(res.statusCode, 200);
+  assert.equal(sentBody.tools, undefined, 'tools field must be absent when body.tools=false');
+  assert.deepEqual(sentBody.response_format, { type: 'json_object' });
+});
+
+test('api: ai/complete with tools=true but no TAVILY_API_KEY sends only fx.rate', async () => {
+  const config = makeConfig({
+    IMAGE_TEXT_API_FORMAT: 'openai',
+    IMAGE_TEXT_BASE_URL: 'https://gw.example/v1',
+    IMAGE_TEXT_MODEL: 'm1',
+    IMAGE_TEXT_API_KEY: 'sk-secret',
+  });
+  let sentBody = null;
+  const fetchImpl = async (url, init) => {
+    sentBody = JSON.parse(init.body);
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        choices: [{ message: { content: '{"ok":1}' } }],
+      }),
+    };
+  };
+  await apiCall({
+    path: '/api/ai/complete',
+    method: 'POST',
+    body: { prompt: 'hi', tools: true },
+    config,
+    events: { append: () => {}, list: () => [] },
+    fetchImpl,
+  });
+  assert.equal(sentBody.tools.length, 1);
+  assert.equal(sentBody.tools[0].function.name, 'fx_rate');
 });
 
 // ---------- integration: real sockets --------------------------------------

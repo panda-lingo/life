@@ -66,7 +66,7 @@ function jsonPrompt(system, task, context) {
   ].join('\n');
 }
 
-async function call(system, task, context, { image = null } = {}) {
+async function call(system, task, context, { image = null, tools = false } = {}) {
   const p = await getProvider();
   const prompt = jsonPrompt(system, task, context);
   // Backend-only resilience: when the chosen provider is the backend server
@@ -78,7 +78,7 @@ async function call(system, task, context, { image = null } = {}) {
   // hide real failures.
   if (p.name === 'backend') {
     try {
-      const raw = await p.complete({ prompt, image });
+      const raw = await p.complete({ prompt, image, tools });
       return JSON.parse(extractJSON(raw));
     } catch (err) {
       const status = err?.status;
@@ -93,7 +93,7 @@ async function call(system, task, context, { image = null } = {}) {
       return JSON.parse(extractJSON(raw));
     }
   }
-  const raw = await p.complete({ prompt, image });
+  const raw = await p.complete({ prompt, image, tools });
   return JSON.parse(extractJSON(raw));
 }
 
@@ -111,9 +111,13 @@ export async function directNextScenario({ worldState, learnerModel, candidates,
     `You are the AI director of a life-simulation English learning game (CEFR B1-C1).
 Pick the next scenario beat that best targets the learner's weaknesses while
 keeping narrative continuity. Prefer beats exercising fossilized error patterns
-or the least-practiced soft skill, unless a pending consequence demands follow-up.`,
+or the least-practiced soft skill, unless a pending consequence demands follow-up.
+You may call web.search / web.fetch / fx.rate when the beat hinges on real-world
+context (e.g., current weather, recent events, exchange rates). Only ground beats
+that genuinely need it; don't pad with redundant lookups.`,
     'Choose one candidate beat id and explain pacing rationale.',
     { worldState, learner: learnerModel, fossilizedErrors: fossilized, candidates },
+    { tools: true },
   );
   // -> { "beatId": "...", "rationale": "...", "framing": "one-line scene setup" }
 }
@@ -173,6 +177,7 @@ others' ideas, explicit role/task clarity). Cite the player's own words as
 evidence. End with one concrete "next time try" suggestion.`,
     'Produce the debrief.',
     { beat, skillFocus, transcriptLog },
+    { tools: true },
   );
   // -> { "scores": {"conflict": x, "time": y, "collaboration": z},
   //      "evidence": ["quote -> why", ...], "nextTime": "..." }
@@ -187,9 +192,11 @@ export async function directTrade({ world, goodId, action, qty }) {
     `You are a market advisor in a life-simulation game. Given the good's
 supply/demand and the player's money, advise whether to proceed with the
 ${action} of ${qty} unit(s). Keep it under 30 words and end with a clear
-"proceed" or "hold" recommendation grounded in the numbers.`,
+"proceed" or "hold" recommendation grounded in the numbers. You may call
+fx.rate when the player is buying/selling a currency-priced good.`,
     'Advise on this trade.',
     { world: worldSummary(world), goodId, action, qty },
+    { tools: true },
   );
   // -> { "advice": "...", "recommendation": "proceed"|"hold", "reason": "..." }
 }

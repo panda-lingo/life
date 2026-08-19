@@ -13,6 +13,9 @@
 //   GOOGLE_MAPS_MAP_ID      optional cloud-styled map id
 //   AI_BODY_LIMIT           /api/ai/complete body cap (default 1 MB)
 //   EVENTS_BODY_LIMIT       /api/events body cap (default 256 KB)
+//   MCP_BODY_LIMIT          /api/mcp body cap (default 64 KB)
+//   MCP_TIMEOUT_MS          per-tool upstream timeout (default 8000)
+//   TAVILY_API_KEY          optional MCP web.search/web.fetch backend key
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,6 +36,8 @@ export function serverConfig(env = process.env) {
     dataDir: env.DATA_DIR || path.join(ROOT, 'data'),
     aiBodyLimit: Number(env.AI_BODY_LIMIT) || 1_048_576,
     eventsBodyLimit: Number(env.EVENTS_BODY_LIMIT) || 262_144,
+    mcpBodyLimit: Number(env.MCP_BODY_LIMIT) || 65_536,
+    mcpTimeoutMs: Number(env.MCP_TIMEOUT_MS) || 8_000,
     ai: {
       configured: aiConfigured,
       baseURL: (env.IMAGE_TEXT_BASE_URL || env.OPENAI_BASE_URL || '').replace(/\/+$/, ''),
@@ -42,6 +47,10 @@ export function serverConfig(env = process.env) {
     maps: {
       apiKey: env.GOOGLE_MAPS_API_KEY || env.GOOGLE_MAPS_KEY || '',
       mapId: env.GOOGLE_MAPS_MAP_ID || '',
+    },
+    mcp: {
+      tavilyApiKey: env.TAVILY_API_KEY || '',
+      timeoutMs: Number(env.MCP_TIMEOUT_MS) || 8_000,
     },
   };
 }

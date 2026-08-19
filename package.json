@@ -17,5 +17,9 @@
   "devDependencies": {
     "@playwright/test": "^1.49.0",
     "openai": "^4.104.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.76"
   }
 }

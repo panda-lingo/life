@@ -239,3 +239,120 @@ test('mock: npcRelationshipDelta handler scores warm/mean transcripts', async ()
   assert.ok(meanOut.affection < 0, 'mean transcript lowers affection');
   assert.ok(meanOut.trust < 0, 'mean transcript lowers trust');
 });
+
+// ---- MCP tools flag plumbing -------------------------------------------
+// director.js forwards `tools: true` to the backend provider for select
+// contract functions (directNextScenario, debriefScenario, directTrade). When
+// the backend mock-degrades on 5xx, the same call degrades to mock. These
+// tests assert the flag is plumbed through and that tool-enabled calls
+// still produce valid JSON.
+
+import { directNextScenario, debriefScenario } from './director.js';
+
+test('directNextScenario: passes tools=true to backend provider', async () => {
+  let capturedReq = null;
+  _setProviderImplsForTests({
+    probeBackend: async () => fakeBackendHealth,
+    backendComplete: async (req) => {
+      capturedReq = req;
+      return '{"beatId":"b1","rationale":"best fit","framing":"scene setup"}';
+    },
+    detectOpenAI: async () => null,
+    mock: fakeMock,
+  });
+  await directNextScenario({
+    worldState: {},
+    learnerModel: { cefr: 'B1' },
+    candidates: [{ id: 'b1', tags: ['test'] }],
+    fossilized: [],
+  });
+  assert.equal(capturedReq.tools, true, 'tools flag must be forwarded to backend');
+});
+
+test('directNextScenario: 5xx from backend still degrades to mock (tools enabled)', async () => {
+  const err = new Error('503 burst'); err.status = 503;
+  let mockCalls = 0;
+  _setProviderImplsForTests({
+    probeBackend: async () => fakeBackendHealth,
+    backendComplete: async () => { throw err; },
+    detectOpenAI: async () => null,
+    mock: { name: 'mock', complete: async () => { mockCalls++; return '{"beatId":"b2","framing":"mock"}'; } },
+  });
+  const out = await directNextScenario({
+    worldState: {},
+    learnerModel: {},
+    candidates: [],
+    fossilized: [],
+  });
+  assert.equal(mockCalls, 1);
+  assert.equal(out.beatId, 'b2');
+});
+
+test('debriefScenario: passes tools=true to backend provider', async () => {
+  let capturedReq = null;
+  _setProviderImplsForTests({
+    probeBackend: async () => fakeBackendHealth,
+    backendComplete: async (req) => {
+      capturedReq = req;
+      return '{"scores":{"conflict":0.7,"time":0.6,"collaboration":0.8},"evidence":[],"nextTime":"try X"}';
+    },
+    detectOpenAI: async () => null,
+    mock: fakeMock,
+  });
+  await debriefScenario({ beat: { id: 'b1' }, transcriptLog: [], skillFocus: {} });
+  assert.equal(capturedReq.tools, true);
+});
+
+test('directTrade: passes tools=true to backend provider (fx.rate uses web access)', async () => {
+  let capturedReq = null;
+  _setProviderImplsForTests({
+    probeBackend: async () => fakeBackendHealth,
+    backendComplete: async (req) => {
+      capturedReq = req;
+      return '{"advice":"buy","recommendation":"proceed","reason":"price low"}';
+    },
+    detectOpenAI: async () => null,
+    mock: fakeMock,
+  });
+  const world = createWorld();
+  await directTrade({ world, goodId: 'coffee', action: 'buy', qty: 1 });
+  assert.equal(capturedReq.tools, true);
+});
+
+test('npcTurn: does NOT enable tools (per-beat latency must stay low)', async () => {
+  let capturedReq = null;
+  _setProviderImplsForTests({
+    probeBackend: async () => fakeBackendHealth,
+    backendComplete: async (req) => {
+      capturedReq = req;
+      return '{"text":"hi","mood":"neutral","effects":{},"beatAdvance":"stay"}';
+    },
+    detectOpenAI: async () => null,
+    mock: fakeMock,
+  });
+  await npcTurn({
+    beat: fakeBeat,
+    npc: fakeBeat.npcs[0],
+    worldState: {},
+    history: [],
+    learnerUtterance: 'hello',
+    targetLevel: 'B1',
+  });
+  assert.notEqual(capturedReq.tools, true, 'npcTurn must not pass tools=true');
+});
+
+test('scoreUtterance: does NOT enable tools (deterministic, latency-sensitive)', async () => {
+  let capturedReq = null;
+  _setProviderImplsForTests({
+    probeBackend: async () => fakeBackendHealth,
+    backendComplete: async (req) => {
+      capturedReq = req;
+      return '{"fluency":3,"range":3,"accuracy":3,"interaction":3,"errors":[],"correction":"good","betterVersion":"..."}';
+    },
+    detectOpenAI: async () => null,
+    mock: fakeMock,
+  });
+  const { scoreUtterance } = await import('./director.js');
+  await scoreUtterance({ transcript: 'hello', context: {}, targetLevel: 'B1' });
+  assert.notEqual(capturedReq.tools, true);
+});

@@ -11,6 +11,8 @@
 // real provider; otherwise it falls back to mockProvider so the game still
 // runs offline / in CI without a key.
 
+import { fetchToolsManifest as defaultFetchToolsManifest, invokeTool as defaultInvokeTool } from './mcpClient.js';
+
 let _OpenAI = null;
 let _OpenAILoadError = null;
 async function loadOpenAI() {
@@ -99,7 +101,12 @@ function effectiveConfig() {
   return envConfig() || runtimeConfig();
 }
 
-export async function openaiProvider({ apiKey, baseURL, model } = {}) {
+export async function openaiProvider({
+  apiKey,
+  baseURL,
+  model,
+  mcp = { fetchToolsManifest: defaultFetchToolsManifest, invokeTool: defaultInvokeTool },
+} = {}) {
   const cfg = effectiveConfig() || {};
   const key = apiKey || cfg.apiKey;
   const url = baseURL || cfg.baseURL;
@@ -143,10 +150,32 @@ export async function openaiProvider({ apiKey, baseURL, model } = {}) {
   });
   const useModel = mdl || 'gpt-4o-mini';
 
+  // MCP tool registry — fetched once per session. When the backend has no
+  // configured tools, the manifest is { tools: [] } and complete() never
+  // attaches any `tools` field — identical to the pre-MCP behavior.
+  let cachedTools = null;
+  let cachedToolsPromise = null;
+  async function loadToolManifest() {
+    if (cachedTools) return cachedTools;
+    cachedToolsPromise ||= (async () => {
+      try {
+        const { fetchToolsManifest: fetchImpl } = mcp;
+        const m = await fetchImpl();
+        cachedTools = (m?.tools || []).filter((t) => t.enabled).map((t) => t.spec);
+      } catch {
+        cachedTools = [];
+      }
+      return cachedTools;
+    })();
+    const v = await cachedToolsPromise;
+    cachedToolsPromise = null;
+    return v;
+  }
+
   return {
     name: 'openai',
     model: useModel,
-    async complete({ prompt, image = null, system = null, json = true, maxTokens = 1024 } = {}) {
+    async complete({ prompt, image = null, system = null, json = true, maxTokens = 1024, tools: wantTools = false } = {}) {
       const userContent = [];
       userContent.push({ type: 'text', text: String(prompt ?? '') });
       if (image) {
@@ -159,13 +188,57 @@ export async function openaiProvider({ apiKey, baseURL, model } = {}) {
       if (system) messages.push({ role: 'system', content: system });
       messages.push({ role: 'user', content: userContent });
 
-      const res = await client.chat.completions.create({
+      const tools = wantTools ? await loadToolManifest() : [];
+      let res = await client.chat.completions.create({
         model: useModel,
         messages,
-        ...(json ? { response_format: { type: 'json_object' } } : {}),
+        ...(tools.length ? { tools } : {}),
+        ...(json && !tools.length ? { response_format: { type: 'json_object' } } : {}),
         max_tokens: maxTokens,
         temperature: 0.4,
       });
+
+      // If the model requested tools, resolve each via /api/mcp, append tool
+      // messages, and call again. Cap the loop to avoid runaway recursion.
+      const MAX_TOOL_ROUNDS = 3;
+      let rounds = 0;
+      while (
+        res?.choices?.[0]?.message?.tool_calls?.length &&
+        rounds < MAX_TOOL_ROUNDS
+      ) {
+        rounds += 1;
+        const toolCalls = res.choices[0].message.tool_calls;
+        messages.push(res.choices[0].message);
+        for (const call of toolCalls) {
+          const fnName = call.function?.name;
+          let parsedArgs = {};
+          try { parsedArgs = JSON.parse(call.function?.arguments || '{}'); } catch { parsedArgs = {}; }
+          let resultText;
+          try {
+            const { invokeTool: invoke } = mcp;
+            const rpc = await invoke({ toolId: fnName, args: parsedArgs });
+            if (rpc?.result?.ok) {
+              resultText = JSON.stringify(rpc.result.value);
+            } else {
+              resultText = JSON.stringify({ error: rpc?.result?.error || rpc?.error?.message || 'unknown tool error' });
+            }
+          } catch (e) {
+            resultText = JSON.stringify({ error: String(e?.message || e) });
+          }
+          messages.push({ role: 'tool', tool_call_id: call.id, content: resultText });
+        }
+        // Follow-up: keep tools attached so the model can chain, but allow
+        // plain text/json output once it's done reasoning with tool data.
+        res = await client.chat.completions.create({
+          model: useModel,
+          messages,
+          ...(tools.length ? { tools } : {}),
+          ...(json ? { response_format: { type: 'json_object' } } : {}),
+          max_tokens: maxTokens,
+          temperature: 0.4,
+        });
+      }
+
       const text = res?.choices?.[0]?.message?.content ?? '';
       return text;
     },

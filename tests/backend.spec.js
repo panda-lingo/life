@@ -22,6 +22,69 @@ test.describe('backend boundary', () => {
     // assert shape only.
     expect(typeof body.ai).toBe('boolean');
     expect(typeof body.maps).toBe('boolean');
+    expect(typeof body.mcp).toBe('boolean');
+  });
+
+  // MCP boundary (docs/mcp.md): a tool registry exposed over same-origin
+  // /api/mcp/tools + a JSON-RPC 2.0 /api/mcp for invocation. Without
+  // TAVILY_API_KEY the manifest reports web.* as disabled; fx.rate is
+  // always available. With the key set, web.* flip to enabled — the e2e
+  // container in CI has no key, so we assert shape and the disabled flag.
+  test('GET /api/mcp/tools lists three v1 tools and shapes { id, enabled, spec }', async ({ request }) => {
+    const res = await request.get('/api/mcp/tools');
+    expect(res.ok()).toBeTruthy();
+    const body = await res.json();
+    expect(Array.isArray(body.tools)).toBe(true);
+    const ids = body.tools.map((t) => t.id).sort();
+    expect(ids).toEqual(['fx.rate', 'web.fetch', 'web.search']);
+    for (const tool of body.tools) {
+      expect(typeof tool.id).toBe('string');
+      expect(typeof tool.enabled).toBe('boolean');
+      expect(tool.spec.type).toBe('function');
+      expect(typeof tool.spec.function?.name).toBe('string');
+      expect(tool.spec.function?.parameters).toBeTruthy();
+    }
+    // CI never exports TAVILY_API_KEY, so web.* must be disabled; fx.rate
+    // has no env requirement and must be enabled regardless.
+    const byId = Object.fromEntries(body.tools.map((t) => [t.id, t]));
+    expect(byId['fx.rate'].enabled).toBe(true);
+    expect(byId['web.search'].enabled).toBe(false);
+    expect(byId['web.fetch'].enabled).toBe(false);
+  });
+
+  test('POST /api/mcp tools.invoke fx.rate: returns structured JSON-RPC envelope', async ({ request }) => {
+    // fx.rate is always available. We don't assert on the rate value —
+    // the upstream keyless API may be unreachable in CI, in which case
+    // the server falls back to its deterministic mock and still returns
+    // a JSON-RPC 2.0 envelope with ok:true.
+    const res = await request.post('/api/mcp', {
+      data: { jsonrpc: '2.0', id: 'e2e-1', method: 'tools.invoke',
+              params: { tool: 'fx.rate', args: { base: 'USD', target: 'EUR' } } },
+    });
+    expect(res.ok()).toBeTruthy();
+    const body = await res.json();
+    expect(body.jsonrpc).toBe('2.0');
+    expect(body.id).toBe('e2e-1');
+    expect(body.result?.ok).toBe(true);
+    expect(typeof body.result.value?.rate).toBe('number');
+    expect(body.result.value?.base).toBe('USD');
+    expect(body.result.value?.target).toBe('EUR');
+  });
+
+  test('POST /api/mcp tools.invoke web.search disabled without TAVILY_API_KEY returns structured error', async ({ request }) => {
+    // In CI the container has no TAVILY_API_KEY. The router must reply with
+    // a structured disabled-tool error (not a hard 5xx) so the model can
+    // proceed without the data.
+    const res = await request.post('/api/mcp', {
+      data: { jsonrpc: '2.0', id: 'e2e-2', method: 'tools.invoke',
+              params: { tool: 'web.search', args: { query: 'london weather' } } },
+    });
+    expect(res.ok()).toBeTruthy();
+    const body = await res.json();
+    expect(body.jsonrpc).toBe('2.0');
+    expect(body.result?.ok).toBe(false);
+    expect(body.result?.code).toBe(4100);
+    expect(body.result?.error).toMatch(/disabled/);
   });
 
   test('GET /api/maps/config answers 404 when no key is set (explore falls back to mock)', async ({ request }) => {

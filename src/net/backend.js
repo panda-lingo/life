@@ -117,10 +117,10 @@ export async function backendAvailable(opts) {
 // A non-ok response throws, EXCEPT 503 (AI unconfigured upstream) which the
 // director interprets as "fall through to the next provider in the chain".
 
-export async function backendComplete({ prompt, image = null }, { fetchImpl = fetch } = {}) {
+export async function backendComplete({ prompt, image = null, tools = false }, { fetchImpl = fetch } = {}) {
   const url = `${origin()}${BASE}/ai/complete`;
   const headers = { 'content-type': 'application/json' };
-  const body = { prompt, image };
+  const body = { prompt, image, ...(tools ? { tools: true } : {}) };
   logRequest({ action: 'ai/complete', url, method: 'POST', headers, body });
   const res = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(body) });
   const text = await res.text();
@@ -156,6 +156,43 @@ export async function backendMapsConfig({ fetchImpl = fetch } = {}) {
   logResponse({ action: 'maps/config', status: res.status, body });
   if (!res.ok || !body?.apiKey) return null;
   return body; // { apiKey, mapId? }
+}
+
+// ---------- MCP tool proxy -------------------------------------------------
+// Mirrors POST /api/mcp from the server. openaiProvider uses this to run
+// tool calls requested by the AI without exposing secrets to the page.
+
+export async function backendMcpInvoke(toolId, args, { fetchImpl = fetch } = {}) {
+  const url = `${origin()}${BASE}`;
+  const headers = { 'content-type': 'application/json' };
+  const body = { id: `mcp-${Date.now()}`, method: 'tools.invoke', params: { tool: toolId, args } };
+  logRequest({ action: 'mcp/invoke', url, method: 'POST', headers, body });
+  let res;
+  try {
+    res = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(body) });
+  } catch (e) {
+    logResponse({ action: 'mcp/invoke', status: 0, body: String(e?.message || e) });
+    throw new Error(`mcp invoke network: ${String(e?.message || e)}`);
+  }
+  const parsed = await res.json().catch(() => ({ error: `non-json status ${res.status}` }));
+  logResponse({ action: 'mcp/invoke', status: res.status, body: parsed });
+  return parsed;
+}
+
+export async function backendMcpTools({ fetchImpl = fetch } = {}) {
+  const url = `${origin()}${BASE}/tools`;
+  logRequest({ action: 'mcp/tools', url, method: 'GET' });
+  let res;
+  try {
+    res = await fetchImpl(url, { method: 'GET' });
+  } catch (e) {
+    logResponse({ action: 'mcp/tools', status: 0, body: String(e?.message || e) });
+    return { tools: [] };
+  }
+  const parsed = await res.json().catch(() => ({ tools: [] }));
+  logResponse({ action: 'mcp/tools', status: res.status, body: parsed });
+  if (!res.ok || !Array.isArray(parsed?.tools)) return { tools: [] };
+  return parsed;
 }
 
 // ---------- event mirroring ------------------------------------------------
