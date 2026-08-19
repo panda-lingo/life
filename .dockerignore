@@ -37,8 +37,6 @@ scripts/
 
 # Node / tooling
 node_modules/
-package.json
-package-lock.json
 
 # Local data / env
 .env*
