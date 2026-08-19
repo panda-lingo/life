@@ -21,6 +21,7 @@ A single persistent `world` object drives the whole game:
   },
   "people": { /* id -> Person */ },
   "market": { /* id -> Good */ },
+  "data": [],                                     // briefing items from MCP tools (≤12, newest first)
   "flags": {},                                    // narrative flags (unchanged)
   "stats": {}                                      // legacy stats (trust, etc.)
 }
@@ -103,14 +104,28 @@ simulation stays explainable and testable without a live AI.
 | `trade.made` | buy/sell | `goodId`, `qty`, `unitPrice`, `from`, `to`, `amount` |
 | `relationship.delta` | after a beat's NPC delta | `npcId`, `affection`, `trust`, `evidence` |
 | `vital.changed` | energy/health/mood/stress cross a threshold | `vital`, `from`, `to` |
+| `data.updated` | MCP tool result folds into world.data | `items`, `source` (tool id), `count` |
+| `mcp.tool.failed` | MCP tool call errored | `tool`, `error` |
 
 All embed a full `world` snapshot (per the offline-analysis contract) so JSONL
 alone reconstructs the whole simulation.
 
+## Real-world data (briefing)
+
+`world.data` holds **briefing items** derived from MCP tool results (see
+docs/mcp.md "In-game surfacing"). The loop reduces the backend's `toolLog`
+through the pure `briefingFromToolLog(toolLog, { ts })` mapping and applies
+it via `tick(w, { kind: 'setData', items })`, which replaces matching ids
+and caps the array at 12 (newest first). NPCs may reference one relevant
+item per turn when `world.data` is non-empty; the HUD renders the
+`#hud-briefing` card from it. Empty data ⇒ no card, no prompt mention —
+identical to the tool-less game.
+
 ## Module contracts
 
 - `src/sim/world.js`: `createWorld()`, `advanceTime(w, mins)`,
-  `applyCost(w, cost)`, `canAfford(w, cost)`, `snapshot(w)`, `tick(w, action)`.
+  `applyCost(w, cost)`, `canAfford(w, cost)`, `snapshot(w)`, `tick(w, action)`,
+  `briefingFromToolLog(toolLog, { ts })`.
 - `src/sim/people.js`: `createPeople()`, `person(w, id)`,
   `applyRelationshipDelta(w, npcId, {affection, trust})`,
   `affection(w, id)`, `trust(w, id)`.

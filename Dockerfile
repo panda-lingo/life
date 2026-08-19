@@ -36,6 +36,12 @@ RUN --mount=type=cache,target=/root/.npm \
     python3 -m json.tool assets/kits/manifest.json > /dev/null || \
     node -e 'JSON.parse(require("fs").readFileSync("assets/kits/manifest.json","utf8"))'
 
+# Install production dependencies for the runtime stage. server/api.js imports
+# @modelcontextprotocol/sdk + zod at module load, so the runtime image must
+# ship node_modules or the container crashes on boot (CI e2e exit code 7).
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev --no-audit --no-fund
+
 # Runtime stage: zero-dependency Node 24 runtime.
 # One process serves the game (statics) + /api/* backend. Secrets
 # (IMAGE_TEXT_*, GOOGLE_MAPS_*) live ONLY on this process; the browser
@@ -50,8 +56,10 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     DATA_DIR=/app/data
 
-# Copy only what the server needs (statics + backend). The builder stage's
-# syntax check has already validated the rest of the tree.
+# Copy only what the server needs (statics + backend + node_modules). The
+# builder stage's syntax check has already validated the rest of the tree.
+COPY --from=builder /build/node_modules ./node_modules
+COPY --from=builder /build/package*.json ./
 COPY --from=builder /build/index.html ./index.html
 COPY --from=builder /build/src ./src
 COPY --from=builder /build/assets ./assets

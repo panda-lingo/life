@@ -79,6 +79,11 @@ async function call(system, task, context, { image = null, tools = false } = {})
   if (p.name === 'backend') {
     try {
       const raw = await p.complete({ prompt, image, tools });
+      // backendComplete returns { text, toolLog } for tool-enabled calls so
+      // the loop can surface real-world data in the briefing card.
+      if (tools && raw && typeof raw === 'object' && 'text' in raw) {
+        return { ...JSON.parse(extractJSON(raw.text)), toolLog: raw.toolLog || [] };
+      }
       return JSON.parse(extractJSON(raw));
     } catch (err) {
       const status = err?.status;
@@ -136,15 +141,27 @@ Only use ids from the provided manifests — never invent assets.`,
 }
 
 // ---- 3. NPC dialogue turn --------------------------------------------
-export async function npcTurn({ beat, npc, worldState, history, learnerUtterance, targetLevel }) {
+// When the sim world carries briefing items (world.data from MCP tools —
+// see docs/mcp.md "In-game surfacing"), the NPC may naturally reference at
+// most one relevant item; the briefing key is omitted entirely when empty
+// so the tool-less prompt is byte-identical to before.
+export async function npcTurn({ beat, npc, worldState, briefing, history, learnerUtterance, targetLevel }) {
   return call(
     `You are ${npc.name} (${npc.role}) in a life-sim English practice game.
 Personality: ${npc.personality}. Current mood toward player: ${npc.mood}.
 Speak natural ${targetLevel}-appropriate English (input slightly above learner
 level). React to what the player said, advance your hidden agenda, and keep
-turns under 40 words. Also output your new mood and any world-state effects.`,
+turns under 40 words. Also output your new mood and any world-state effects.${
+      briefing?.length
+        ? '\nA real-world briefing is attached in the context JSON. You MAY naturally reference at most ONE relevant item (news, exchange rate, local info) if it fits the conversation — never more, and never invent topics not listed.'
+        : ''
+    }`,
     'Reply in character.',
-    { beat, worldState, recentHistory: history.slice(-8), learnerUtterance },
+    {
+      beat, worldState,
+      ...(briefing?.length ? { briefing } : {}),
+      recentHistory: history.slice(-8), learnerUtterance,
+    },
   );
   // -> { "text": "...", "mood": "...", "effects": {"flags": {...}, "stats": {...}}, "beatAdvance": "stay|advance|fail" }
 }

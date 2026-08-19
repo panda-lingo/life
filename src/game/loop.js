@@ -8,7 +8,7 @@ import {
   createLearnerModel, updateLanguage, updateSkills,
   fossilizedErrors, cefrEstimate,
 } from '../data/learnerModel.js';
-import { createWorld, tick, canAfford, snapshot, isExhausted } from '../sim/world.js';
+import { createWorld, tick, canAfford, snapshot, isExhausted, briefingFromToolLog } from '../sim/world.js';
 import { person } from '../sim/people.js';
 import {
   createRecognizer, speak, pickVoice, stopSpeaking, speechCapabilities,
@@ -198,12 +198,28 @@ function returnToSplash() {
   setTimeout(() => { if (typeof location !== 'undefined') location.reload(); }, 2_000);
 }
 
-async function runNextBeat(s, { signal, candidates, beatMap = beats }) {  const { beatId, framing } = await directNextScenario({
+async function runNextBeat(s, { signal, candidates, beatMap = beats }) {
+  const { beatId, framing, toolLog } = await directNextScenario({
     worldState: s.worldState,
     learnerModel: s.learnerModel,
     candidates,
     fossilized: fossilizedErrors(s.learnerModel),
   });
+
+  // Briefing (v1.2, docs/mcp.md): fold any real-world data the director's
+  // tool calls returned into world.data, then surface it via the HUD card.
+  if (Array.isArray(toolLog) && toolLog.length) {
+    const items = briefingFromToolLog(toolLog, { ts: Date.now() });
+    if (items.length) {
+      const r = tick(s.world, { kind: 'setData', items });
+      s.world = r.world;
+      await emit('data.updated', { items, count: s.world.data.length, source: 'mcp' });
+    }
+    for (const entry of toolLog.filter((t) => !t.ok)) {
+      await emit('mcp.tool.failed', { tool: entry.tool, error: entry.error });
+    }
+  }
+
   s.currentBeat = beatMap[beatId];
   if (!s.currentBeat) return false;
 
@@ -236,6 +252,7 @@ async function runNextBeat(s, { signal, candidates, beatMap = beats }) {  const 
     beat: s.currentBeat,
     npc: simNpc ? { ...npc, mood: simNpc.mood, affection: simNpc.affection } : npc,
     worldState: s.worldState,
+    briefing: s.world.data,
     history: s.transcriptLog,
     learnerUtterance: '(scene opens)',
     targetLevel: cefrEstimate(s.learnerModel),
@@ -288,7 +305,8 @@ async function playDialogueSteps(s, { signal, beat }) {
       updateLanguage(s.learnerModel, score, score.errors || []);
 
       const reply = await npcTurn({
-        beat, npc: beat.npcs[0], worldState: s.worldState, history: s.transcriptLog,
+        beat, npc: beat.npcs[0], worldState: s.worldState, briefing: s.world.data,
+        history: s.transcriptLog,
         learnerUtterance: utterance || '(silence)',
         targetLevel: cefrEstimate(s.learnerModel),
       });

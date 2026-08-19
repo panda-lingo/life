@@ -78,6 +78,50 @@ test.describe('LifeSpeak mobile (redroid)', () => {
     expect(overflow.scrollW, 'page overflows viewport horizontally').toBeLessThanOrEqual(overflow.clientW);
   });
 
+  test('briefing card renders and toggles responsively on mobile viewport', async ({ page }) => {
+    await page.goto('/');
+    await page.locator('#start').tap();
+    await expect(page.locator('#splash')).toHaveCount(0, { timeout: 5000 });
+    await expect(page.locator('#hud-status')).toBeVisible({ timeout: 10_000 });
+
+    // Inject data on mobile
+    await page.evaluate(async () => {
+      const { renderHUD } = await import('/src/ui/hud.js');
+      const testData = [
+        { id: 'fx:USD:JPY', kind: 'fx', icon: '💱', title: 'USD→JPY rate', summary: '1 USD ≈ 155 JPY', ts: 100 },
+        { id: 'news:kyodo.jp:0', kind: 'news', icon: '📰', title: 'Tokyo weather today', summary: 'Mild spring breeze', ts: 200 },
+      ];
+      await renderHUD({
+        world: {
+          player: { money: 100, energy: 80, mood: 60, stress: 20 },
+          clock: { day: 1, minute: 600 },
+          data: testData,
+        },
+      });
+    });
+
+    const card = page.locator('#hud-briefing');
+    await expect(card).toBeVisible();
+    await expect(card).toHaveAttribute('data-expanded', 'false');
+
+    // Tap to expand
+    await card.tap();
+    await expect(card).toHaveAttribute('data-expanded', 'true');
+    await expect(page.locator('#hud-briefing-list')).toBeVisible();
+
+    // Check no horizontal overflow when expanded
+    const overflow = await page.evaluate(() => ({
+      scrollW: document.documentElement.scrollWidth,
+      clientW: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollW, 'expanded briefing card overflows viewport horizontally').toBeLessThanOrEqual(overflow.clientW);
+
+    // Tap to collapse
+    await card.tap();
+    await expect(card).toHaveAttribute('data-expanded', 'false');
+    await expect(page.locator('#hud-briefing-list')).toHaveCount(0);
+  });
+
   test('explore mode: place picker tappable, dialogue HUD renders (mock maps)', async ({ page, request }) => {
     // Same flow as the desktop explore test, exercised at the redroid
     // viewport. Mock maps (no API key) renders 3 places; real maps (key set

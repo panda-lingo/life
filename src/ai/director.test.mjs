@@ -288,6 +288,32 @@ test('directNextScenario: 5xx from backend still degrades to mock (tools enabled
   assert.equal(out.beatId, 'b2');
 });
 
+test('call: backend toolLog is unwrapped onto returned object for tool-enabled calls', async () => {
+  const fakeToolLog = [
+    { tool: 'fx.rate', args: { base: 'USD', target: 'EUR' }, ok: true, value: { rate: 0.92 }, ms: 12 },
+  ];
+  _setProviderImplsForTests({
+    probeBackend: async () => fakeBackendHealth,
+    backendComplete: async () => ({
+      text: '{"beatId":"beat-1","framing":"intro","rationale":"test"}',
+      toolLog: fakeToolLog,
+    }),
+    detectOpenAI: async () => null,
+    mock: fakeMock,
+  });
+
+  const out = await directNextScenario({
+    worldState: {},
+    learnerModel: {},
+    candidates: [{ id: 'beat-1' }],
+    fossilized: [],
+  });
+
+  assert.equal(out.beatId, 'beat-1');
+  assert.equal(out.framing, 'intro');
+  assert.deepEqual(out.toolLog, fakeToolLog);
+});
+
 test('debriefScenario: passes tools=true to backend provider', async () => {
   let capturedReq = null;
   _setProviderImplsForTests({

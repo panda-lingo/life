@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createWorld, advanceTime, applyCost, canAfford, applyEffects, tick,
-  snapshot, clockString, isExhausted, isTiredHour, __test__,
+  snapshot, clockString, isExhausted, isTiredHour, briefingFromToolLog, __test__,
 } from './world.js';
 
 const { DAY_MINUTES, DAY_END_MINUTES, TIRED_AFTER_MINUTE, TIRED_MULTIPLIER } = __test__;
@@ -156,3 +156,116 @@ test('tick buy blocks when funds are insufficient', () => {
   assert.equal(r.result.ok, false);
   assert.match(r.result.reason, /insufficient|sold/);
 });
+
+test('tick setData folds briefing items with replace-by-id and cap 12 newest-first', () => {
+  const w = createWorld();
+  assert.deepEqual(w.data, []);
+
+  const items1 = [
+    { id: 'fx:USD:EUR', kind: 'fx', icon: '💱', title: 'USD→EUR rate', summary: '1 USD ≈ 0.92 EUR', ts: 100 },
+    { id: 'news:example.com:0', kind: 'news', icon: '📰', title: 'News A', summary: 'Summary A', ts: 200 },
+  ];
+  const r1 = tick(w, { kind: 'setData', items: items1 });
+  assert.equal(r1.result.ok, true);
+  assert.equal(r1.result.count, 2);
+  assert.equal(r1.world.data.length, 2);
+  // Sorted newest first
+  assert.equal(r1.world.data[0].id, 'news:example.com:0');
+  assert.equal(r1.world.data[1].id, 'fx:USD:EUR');
+
+  // Replace-by-id updates existing item
+  const updateFx = [
+    { id: 'fx:USD:EUR', kind: 'fx', icon: '💱', title: 'USD→EUR rate', summary: '1 USD ≈ 0.95 EUR', ts: 300 },
+  ];
+  const r2 = tick(r1.world, { kind: 'setData', items: updateFx });
+  assert.equal(r2.world.data.length, 2);
+  assert.equal(r2.world.data[0].id, 'fx:USD:EUR');
+  assert.equal(r2.world.data[0].summary, '1 USD ≈ 0.95 EUR');
+
+  // Cap at 12 items
+  const many = Array.from({ length: 15 }, (_, i) => ({
+    id: `item:${i}`, kind: 'news', icon: '📰', title: `Title ${i}`, summary: `Sum ${i}`, ts: 400 + i,
+  }));
+  const r3 = tick(r2.world, { kind: 'setData', items: many });
+  assert.equal(r3.world.data.length, 12);
+  // Newest should be item:14
+  assert.equal(r3.world.data[0].id, 'item:14');
+});
+
+test('briefingFromToolLog maps fx.rate, web.search, web.fetch correctly and skips failures', () => {
+  const toolLog = [
+    {
+      tool: 'fx.rate',
+      args: { base: 'USD', target: 'EUR' },
+      ok: true,
+      value: { base: 'USD', target: 'EUR', rate: 0.92, source: 'open.er-api.com' },
+      ms: 10,
+    },
+    {
+      tool: 'web.search',
+      args: { query: 'tokyo weather' },
+      ok: true,
+      value: {
+        results: [
+          { title: 'Tokyo Forecast', content: 'Sunny 22C', url: 'https://weather.jp/tokyo' },
+          { title: 'Tokyo News', content: 'Traffic normal', url: 'https://news.jp/article' },
+        ],
+      },
+      ms: 50,
+    },
+    {
+      tool: 'web.fetch',
+      args: { url: 'https://example.com/rates' },
+      ok: true,
+      value: { url: 'https://example.com/rates', content: 'Inflation report 2026' },
+      ms: 30,
+    },
+    {
+      tool: 'web.search',
+      args: { query: 'fail search' },
+      ok: false,
+      error: 'timeout',
+      ms: 8000,
+    },
+    {
+      tool: 'unknown.tool',
+      args: {},
+      ok: true,
+      value: {},
+      ms: 5,
+    },
+  ];
+
+  const items = briefingFromToolLog(toolLog, { ts: 1234567890 });
+  // fx (1) + search (2) + fetch (1) = 4 items; failure skipped, unknown skipped
+  assert.equal(items.length, 4);
+
+  // 1. fx
+  const fxItem = items.find((it) => it.id === 'fx:USD:EUR');
+  assert.ok(fxItem);
+  assert.equal(fxItem.kind, 'fx');
+  assert.equal(fxItem.icon, '💱');
+  assert.equal(fxItem.summary, '1 USD ≈ 0.92 EUR');
+  assert.equal(fxItem.ts, 1234567890);
+
+  // 2. search
+  const search0 = items.find((it) => it.id === 'news:weather.jp:0');
+  assert.ok(search0);
+  assert.equal(search0.kind, 'news');
+  assert.equal(search0.icon, '📰');
+  assert.equal(search0.title, 'Tokyo Forecast');
+  assert.equal(search0.summary, 'Sunny 22C');
+
+  // 3. fetch
+  const fetch0 = items.find((it) => it.id === 'web:example.com');
+  assert.ok(fetch0);
+  assert.equal(fetch0.kind, 'web');
+  assert.equal(fetch0.icon, '🌐');
+  assert.equal(fetch0.title, 'example.com');
+  assert.equal(fetch0.summary, 'Inflation report 2026');
+
+  // Empty / invalid input returns []
+  assert.deepEqual(briefingFromToolLog([]), []);
+  assert.deepEqual(briefingFromToolLog(null), []);
+});
+

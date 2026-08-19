@@ -7,6 +7,7 @@ import { clockString, isExhausted } from '../sim/world.js';
 
 let container = null;
 let state = {};
+let briefingExpanded = false;
 
 // ---- pub/sub: choice + text-input bridges ----
 // Multiple awaiters may subscribe simultaneously; the loop awaits a fresh
@@ -54,6 +55,91 @@ function renderStatus() {
     div.textContent = `CEFR ${cefrEstimate({ cefrIndex: state.learnerCefrIndex ?? 1 })} · ${trust} trust`;
   }
   return div;
+}
+
+function renderBriefing() {
+  const items = state.world?.data;
+  if (!Array.isArray(items) || !items.length) return null;
+
+  const card = document.createElement('div');
+  card.id = 'hud-briefing';
+  card.dataset.expanded = briefingExpanded ? 'true' : 'false';
+  card.style.cssText =
+    'background:rgba(30,34,48,0.92); border:1px solid rgba(255,255,255,0.12);' +
+    'border-radius:8px; padding:6px 10px; font-size:12px; cursor:pointer;' +
+    'transition:background 0.15s ease; user-select:none;';
+
+  const countByKind = (k) => items.filter((it) => it.kind === k).length;
+  const newsCount = countByKind('news');
+  const fxCount = countByKind('fx');
+  const webCount = countByKind('web');
+  const summaryPills = [];
+  if (newsCount) summaryPills.push(`📰 ${newsCount}`);
+  if (fxCount) summaryPills.push(`💱 ${fxCount}`);
+  if (webCount) summaryPills.push(`🌐 ${webCount}`);
+
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex; justify-content:space-between; align-items:center; gap:8px;';
+
+  const titleLeft = document.createElement('div');
+  titleLeft.style.cssText = 'display:flex; align-items:center; gap:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+  const label = document.createElement('strong');
+  label.textContent = 'Briefing';
+  label.style.color = '#bdc3ff';
+  titleLeft.appendChild(label);
+
+  const pillsSpan = document.createElement('span');
+  pillsSpan.textContent = summaryPills.join(' · ') || `${items.length} updates`;
+  pillsSpan.style.opacity = '0.85';
+  titleLeft.appendChild(pillsSpan);
+
+  // Show the latest headline preview in collapsed mode
+  if (!briefingExpanded && items[0]) {
+    const preview = document.createElement('span');
+    preview.textContent = `— ${items[0].title}`;
+    preview.style.cssText = 'opacity:0.65; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+    titleLeft.appendChild(preview);
+  }
+  header.appendChild(titleLeft);
+
+  const chevron = document.createElement('span');
+  chevron.textContent = briefingExpanded ? '▲' : '▼';
+  chevron.style.cssText = 'opacity:0.6; font-size:10px; flex-shrink:0;';
+  header.appendChild(chevron);
+  card.appendChild(header);
+
+  if (briefingExpanded) {
+    const list = document.createElement('div');
+    list.id = 'hud-briefing-list';
+    list.style.cssText = 'margin-top:6px; padding-top:6px; border-top:1px solid rgba(255,255,255,0.08); display:flex; flex-direction:column; gap:4px; max-height:160px; overflow-y:auto;';
+    items.slice(0, 5).forEach((item) => {
+      const row = document.createElement('div');
+      row.className = 'hud-briefing-row';
+      row.dataset.briefingKind = item.kind || 'news';
+      row.dataset.briefingId = item.id || '';
+      row.style.cssText = 'line-height:1.3; font-size:11px;';
+      const rowTitle = document.createElement('div');
+      rowTitle.style.cssText = 'font-weight:600; color:#fff;';
+      rowTitle.textContent = `${item.icon || '•'} ${item.title || ''}`;
+      row.appendChild(rowTitle);
+      if (item.summary) {
+        const rowSummary = document.createElement('div');
+        rowSummary.style.cssText = 'opacity:0.75; color:#ddd;';
+        rowSummary.textContent = item.summary;
+        row.appendChild(rowSummary);
+      }
+      list.appendChild(row);
+    });
+    card.appendChild(list);
+  }
+
+  card.onclick = (e) => {
+    e.stopPropagation();
+    briefingExpanded = !briefingExpanded;
+    renderHUD({});
+  };
+
+  return card;
 }
 
 function renderDialogue() {
@@ -163,6 +249,8 @@ export async function renderHUD(update) {
   state = { ...state, ...update };
   ensureContainer();
   container.innerHTML = '';
+  const briefing = renderBriefing();
+  if (briefing) container.appendChild(briefing);
   container.appendChild(renderStatus());
   container.appendChild(renderDialogue());
   if (state.choice) container.appendChild(renderChoice());
@@ -238,6 +326,7 @@ export function clearHUDOverlays() {
 export function __resetHUDForTests() {
   if (container) { container.remove(); container = null; }
   state = {};
+  briefingExpanded = false;
   choiceWaiters.clear();
   textWaiters.clear();
   placeWaiters.clear();

@@ -189,6 +189,10 @@ async function callUpstream({ config, body, fetchImpl }) {
 
   // Tool-call loop: when the model requests tools, dispatch each via
   // handleMcp's invocation path. Capped to avoid runaway recursion.
+  // Every invocation is appended to `toolLog` (tool id, args, ok, value/error,
+  // ms) and returned on the response so the frontend can surface real-world
+  // data in the briefing card (docs/mcp.md "In-game surfacing").
+  const toolLog = [];
   const MAX_TOOL_ROUNDS = 3;
   let rounds = 0;
   while (
@@ -202,7 +206,15 @@ async function callUpstream({ config, body, fetchImpl }) {
       const fnName = call.function?.name;
       let parsedArgs = {};
       try { parsedArgs = JSON.parse(call.function?.arguments || '{}'); } catch { parsedArgs = {}; }
+      const t0 = Date.now();
       const toolResult = await runMcpTool(config, fnName, parsedArgs);
+      toolLog.push({
+        tool: fnName,
+        args: parsedArgs,
+        ok: !!toolResult.ok,
+        ...(toolResult.ok ? { value: toolResult.value } : { error: toolResult.error }),
+        ms: Date.now() - t0,
+      });
       messages.push({
         role: 'tool',
         tool_call_id: call.id,
@@ -216,7 +228,7 @@ async function callUpstream({ config, body, fetchImpl }) {
   }
 
   const completion = upstreamRes.parsed?.choices?.[0]?.message?.content ?? '';
-  return { status: 200, body: { text: completion } };
+  return { status: 200, body: { text: completion, ...(wantTools ? { toolLog } : {}) } };
 }
 
 // Server-side equivalent of src/ai/mcpClient.invokeTool. Runs the tool

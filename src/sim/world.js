@@ -19,6 +19,8 @@ const TIRED_AFTER_MINUTE = 22 * 60;   // 22:00 — energy costs ×1.5
 const TIRED_MULTIPLIER = 1.5;
 const VITAL_MIN = 0;
 const VITAL_MAX = 100;
+const DATA_CAP = 12;                  // briefing items kept (newest first)
+const DATA_SUMMARY_MAX = 220;         // chars kept per briefing summary
 
 // Vitals that live on player and are clamped to [0,100].
 const CLAMPED_VITALS = ['energy', 'health', 'mood', 'stress'];
@@ -41,6 +43,7 @@ export function createWorld({ people = createPeople(), market = createMarket() }
     },
     people,
     market,
+    data: [],     // briefing items from MCP tool results (see docs/mcp.md)
     flags: {},
     stats: {},
   };
@@ -55,6 +58,7 @@ export function snapshot(world) {
     stats: world.stats,
     people: world.people,
     market: world.market,
+    data: world.data || [],
   });
 }
 
@@ -239,9 +243,95 @@ export function tick(world, action) {
       const w = applyRelationshipDelta(world, action.npcId, action.delta || {});
       return { world: w, result: { ok: true, npcId: action.npcId, delta: action.delta } };
     }
+    case 'setData': {
+      const w = clone(world);
+      const incoming = Array.isArray(action.items) ? action.items : [];
+      // Replace-by-id: fold new items in, then cap newest-first.
+      const byId = new Map();
+      for (const item of [...(w.data || []), ...incoming]) {
+        if (item && item.id) byId.set(item.id, item);
+      }
+      w.data = [...byId.values()]
+        .sort((a, b) => (b.ts || 0) - (a.ts || 0))
+        .slice(0, DATA_CAP);
+      return { world: w, result: { ok: true, count: w.data.length, added: incoming.length } };
+    }
     default:
       return { world, result: { ok: false, reason: `unknown-kind:${action.kind}` } };
   }
+}
+
+// ---- briefing: reduce MCP toolLog entries to world.data items -----------
+// Pure mapping, data-driven by tool id (docs/mcp.md "In-game surfacing").
+// Only ok:true entries produce items; failures are skipped (the loop still
+// logs them as mcp.tool.failed events).
+
+const trimSummary = (s, max = DATA_SUMMARY_MAX) => {
+  const t = String(s || '').replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+};
+
+const hostOf = (url) => {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'web'; }
+};
+
+// Each mapper: (value, args, ts) -> briefing item | [items] | null.
+const BRIEFING_MAPPERS = {
+  'fx.rate': (v, args, ts) => {
+    if (typeof v?.rate !== 'number') return null;
+    const base = v.base || args?.base || '';
+    const target = v.target || args?.target || '';
+    return {
+      id: `fx:${base}:${target}`,
+      kind: 'fx', icon: '💱',
+      title: `${base}→${target} rate`,
+      summary: `1 ${base} ≈ ${v.rate} ${target}`,
+      source: v.source || 'open.er-api.com', ts,
+    };
+  },
+  'web.search': (v, _args, ts) => {
+    const results = Array.isArray(v?.results) ? v.results : [];
+    return results.slice(0, 5).map((r, i) => ({
+      id: `news:${hostOf(r.url)}:${i}`,
+      kind: 'news', icon: '📰',
+      title: trimSummary(r.title, 120),
+      summary: trimSummary(r.content),
+      source: r.url || '', ts,
+    }));
+  },
+  'web.fetch': (v, args, ts) => {
+    const url = v?.url || args?.url || '';
+    const host = hostOf(url);
+    const text = v?.rawContent || v?.content || '';
+    if (!text) return null;
+    return {
+      id: `web:${host}`,
+      kind: 'web', icon: '🌐',
+      title: host,
+      summary: trimSummary(text),
+      source: url, ts,
+    };
+  },
+};
+
+/**
+ * Reduce a backend `toolLog` (array of { tool, args, ok, value }) into
+ * briefing items for world.data. Pure — `ts` must be injected by the caller
+ * so world.js never calls Date.now(). Returns [] for non-array / no ok:true
+ * entries. Unknown tools are ignored.
+ */
+export function briefingFromToolLog(toolLog, { ts = 0 } = {}) {
+  if (!Array.isArray(toolLog)) return [];
+  const items = [];
+  for (const entry of toolLog) {
+    if (!entry?.ok) continue;
+    const mapper = BRIEFING_MAPPERS[entry.tool];
+    if (!mapper) continue;
+    const mapped = mapper(entry.value, entry.args || {}, ts);
+    if (Array.isArray(mapped)) items.push(...mapped.filter(Boolean));
+    else if (mapped) items.push(mapped);
+  }
+  return items.filter((it) => it && it.id);
 }
 
 // Deep clone via structuredClone so pure functions never share references with

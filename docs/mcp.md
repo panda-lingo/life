@@ -205,6 +205,97 @@ Each tool:
   `GET /api/mcp/tools` returns the expected enabled/disabled set, and
   drives a tool call through `POST /api/mcp` against the real server.
 
+## In-game surfacing: the briefing card (v1.2)
+
+Tool results would vanish the moment the model folds them into prose
+unless the game keeps a copy. v1.2 makes tool use visible: every tool
+the AI calls during a director turn is recorded, normalized into
+**briefing items**, stored on the simulation world (`world.data`), and
+rendered as a collapsible HUD card (`#hud-briefing`) so the player can
+see *what real-world data the game is using*.
+
+### Desired end state (one paragraph)
+
+When a tool-enabled director call (`directNextScenario`, `debriefScenario`,
+`directTrade`) makes the model invoke `web.search` / `web.fetch` /
+`fx.rate`, the backend executes the tool and appends each invocation to a
+`toolLog` array on the `/api/ai/complete` response. The frontend backend
+provider unwraps `toolLog` and returns it beside the text; the director
+returns `{ ...result, toolLog }` from tool-enabled calls only (the
+latency-sensitive `npcTurn` / `scoreUtterance` / scene-composition calls
+keep returning plain parsed JSON so the mock-provider contract is
+unchanged). The loop reduces each tool-log entry through the pure
+`briefingFromToolLog()` mapping into a capped `world.data` array via
+`tick(world, { kind: 'setData', items })`, emits a `data.updated` event
+with a world snapshot, and the HUD renders the briefing card above
+`#hud-status` whenever `world.data` is non-empty. With no tools
+configured, or when the model never calls one, `world.data` stays empty
+and the card never renders — the game is byte-identical to the tool-less
+path.
+
+### Data-driven mapping: toolLog → briefing items
+
+`src/sim/world.js` owns the pure mapping (data-driven: keyed by tool id):
+
+| Tool | Item shape | Icon |
+|---|---|---|
+| `fx.rate` | `{ id: 'fx:BASE:TARGET', kind: 'fx', icon: '💱', title: 'BASE→TARGET rate', summary: '1 USD ≈ 0.92 EUR', source: 'open.er-api.com', ts }` | 💱 |
+| `web.search` | one item per result: `{ id: 'news:<url-host>:<i>', kind: 'news', icon: '📰', title: result.title, summary: result.content, source: result.url, ts }` | 📰 |
+| `web.fetch` | `{ id: 'web:<url-host>', kind: 'web', icon: '🌐', title: <url-host>, summary: rawContent excerpt, source: url, ts }` | 🌐 |
+
+Rules:
+
+- Only `{ ok: true }` tool-log entries produce items; failures are
+  skipped (the model already saw the error).
+- `world.data` is **capped at 12 items** (newest first); a re-fetched id
+  replaces the older entry in place. This keeps the context JSON small
+  and the card readable on a phone.
+- `ts` is injected by the caller (loop) — `world.js` stays free of
+  `Date.now()` per the pure-core constraint.
+- Failed entries are still observable: the loop emits
+  `mcp.tool.failed { tool, error }` events.
+
+### Backend surface: `toolLog`
+
+`POST /api/ai/complete` with `tools: true` now responds
+`{ text, toolLog: [{ tool, args, ok, value? | error?, ms }] }`. `toolLog`
+is present on every tool-enabled response (possibly an empty array) and
+absent on tool-less responses. Tool secrets never appear in it: `value`
+is the already-capped tool payload, and every entry is logged server-side
+as masked curl via the existing `httpLog` rules.
+
+### Dialogue grounding
+
+`world.data` is included in the `CONTEXT (JSON)` of `npcTurn` (and
+`directNextScenario` already sees the world) under the key
+`briefing: [...]`. The `npcTurn` system prompt gains one rule: when
+`briefing` is non-empty, the NPC *may* naturally reference at most one
+relevant item ("did you see the dollar slipped?") — never more, and
+never fabricated topics. `scoreUtterance` and composition contexts stay
+briefing-free to keep payloads small.
+
+### HUD card contract (`#hud-briefing`)
+
+- Rendered by `renderHUD` whenever `state.world.data` is non-empty;
+  removed (not hidden) when empty.
+- A single collapsed pill line by default: `📰 <n> · 💱 <m> · <latest title>`.
+  Tapping toggles an expanded list (≤ 5 visible rows, scrollable), each
+  row `icon title — summary`, with a `data-briefing-kind` attribute per
+  row for tests.
+- Sits above `#hud-status` inside the existing HUD container, so it
+  inherits the responsive fixed-bottom layout and is covered by the same
+  desktop + mobile/redroid e2e viewports.
+- Pure render: the card reflects `world.data`; it never fetches.
+
+### Failure modes (additions to the table above)
+
+| Failure | Behavior |
+|---|---|
+| Tool succeeds but payload shape unexpected | `briefingFromToolLog` yields `[]`; world unchanged |
+| `toolLog` missing from backend response (old server) | director defaults to `[]`; loop skips `data.updated` |
+| All tool calls in a turn fail | no `world.data` mutation; one `mcp.tool.failed` event per failure |
+| Backend 5xx mid tool-loop | existing rule: whole turn degrades to mock (no toolLog) |
+
 ## Out of scope (v1)
 
 - Bidirectional MCP streaming / SSE (we proxy a single round-trip;

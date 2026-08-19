@@ -84,6 +84,56 @@ test.describe('LifeSpeak smoke', () => {
     await expect(status).toContainText(/CEFR/);
   });
 
+  test('briefing card renders above status when world.data is populated and expands on click', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+    await page.locator('#start').click();
+    await expect(page.locator('#splash')).toHaveCount(0, { timeout: 5000 });
+    await expect(page.locator('#hud-status')).toBeVisible({ timeout: 10_000 });
+
+    // 1. By default, world.data is empty -> #hud-briefing is not attached
+    await expect(page.locator('#hud-briefing')).toHaveCount(0);
+
+    // 2. Inject briefing data via page.evaluate and trigger renderHUD
+    await page.evaluate(async () => {
+      const { renderHUD } = await import('/src/ui/hud.js');
+      const testData = [
+        { id: 'fx:USD:EUR', kind: 'fx', icon: '💱', title: 'USD→EUR rate', summary: '1 USD ≈ 0.92 EUR', ts: 100 },
+        { id: 'news:bbc.com:0', kind: 'news', icon: '📰', title: 'Tech news today', summary: 'AI models launch', ts: 200 },
+      ];
+      await renderHUD({
+        world: {
+          player: { money: 100, energy: 80, mood: 60, stress: 20 },
+          clock: { day: 1, minute: 600 },
+          data: testData,
+        },
+      });
+    });
+
+    // 3. Card mounts and is collapsed initially
+    const card = page.locator('#hud-briefing');
+    await expect(card).toBeVisible();
+    await expect(card).toHaveAttribute('data-expanded', 'false');
+    await expect(card).toContainText(/Briefing/);
+    await expect(card).toContainText(/💱 1/);
+    await expect(card).toContainText(/📰 1/);
+    await expect(page.locator('#hud-briefing-list')).toHaveCount(0);
+
+    // 4. Click toggles expansion and renders rows with data attributes
+    await card.click();
+    await expect(card).toHaveAttribute('data-expanded', 'true');
+    const list = page.locator('#hud-briefing-list');
+    await expect(list).toBeVisible();
+    const rows = list.locator('.hud-briefing-row');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.first()).toHaveAttribute('data-briefing-id', 'fx:USD:EUR');
+
+    // 5. Click again collapses
+    await card.click();
+    await expect(card).toHaveAttribute('data-expanded', 'false');
+    await expect(page.locator('#hud-briefing-list')).toHaveCount(0);
+  });
+
   test('explore mode: place picker → café dialogue (mock maps)', async ({ page, request }) => {
     // Probe backend maps configuration: when GOOGLE_MAPS_API_KEY is unset the
     // boundary falls back to the deterministic mock (3 places); when set the

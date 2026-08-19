@@ -136,6 +136,11 @@ export async function backendComplete({ prompt, image = null, tools = false }, {
     err.status = res.status;
     throw err;
   }
+  // Tool-enabled responses carry a toolLog ([{ tool, args, ok, value|error, ms }]);
+  // the director unwraps { text, toolLog } so the loop can surface briefing items.
+  if (tools && Array.isArray(parsed.toolLog)) {
+    return { text: parsed.text, toolLog: parsed.toolLog };
+  }
   return parsed.text;
 }
 

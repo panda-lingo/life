@@ -170,6 +170,113 @@ test('sim: a beat costs energy/money/time and moves the world clock', async () =
   assert.ok(types.includes('beat.start'), 'missing beat.start');
 });
 
+test('sim: briefing toolLog folds into world.data and emits data.updated', async () => {
+  // Switch the mock to a backend provider that returns a toolLog envelope
+  // for directNextScenario. This proves the loop wiring: toolLog →
+  // briefingFromToolLog → tick(setData) → world.data → data.updated event.
+  _setProviderImplsForTests({
+    probeBackend: async () => ({ ok: true, ai: true, maps: false }),
+    detectOpenAI: async () => null,
+    mock: { name: 'mock', complete: async () => '{}' },
+    backendComplete: async ({ prompt }) => {
+      const raw = String(prompt);
+      const task = raw.match(/TASK: ([^\n]+)/)?.[1] || '';
+      if (task.includes('Choose one candidate')) {
+        const id = raw.match(/"id":\s*"([^"]+)"/)?.[1];
+        return {
+          text: JSON.stringify({ beatId: id, rationale: 'test', framing: 'test' }),
+          toolLog: [
+            {
+              tool: 'fx.rate',
+              args: { base: 'USD', target: 'EUR' },
+              ok: true,
+              value: { base: 'USD', target: 'EUR', rate: 0.92, source: 'open.er-api.com' },
+              ms: 5,
+            },
+            {
+              tool: 'web.search',
+              args: { query: 'integration news' },
+              ok: true,
+              value: {
+                results: [
+                  { title: 'Briefing headline', content: 'Integration body', url: 'https://example.com/a' },
+                ],
+              },
+              ms: 10,
+            },
+            {
+              tool: 'web.search',
+              args: { query: 'failure' },
+              ok: false,
+              error: 'upstream down',
+              ms: 8000,
+            },
+          ],
+        };
+      }
+      if (task.includes('Reply in character')) return JSON.stringify({ text: 'Reply', mood: 'neutral' });
+      if (task.includes('Score this utterance')) return JSON.stringify({ fluency: 3, range: 3, accuracy: 3, interaction: 3, errors: [], correction: '', betterVersion: '' });
+      if (task.includes('Produce the debrief')) return JSON.stringify({ scores: { interaction: 0.7 }, evidence: [], nextTime: '' });
+      if (task.includes('Return the scene composition')) return JSON.stringify({ kit: 'urban-cafe', layout: 'default', props: {} });
+      if (task.includes('Score the relationship delta')) return JSON.stringify({ affection: 8, trust: 5, evidence: 'stub' });
+      if (task.includes('Advise on this trade')) return JSON.stringify({ advice: 'stub', recommendation: 'proceed', reason: 'stub' });
+      return '{}';
+    },
+  });
+
+  const t = (await import('./loop.js')).__test__;
+  const session = t.newSession();
+
+  const promise = t.runNextBeat(session, {
+    signal: session.ctrl.signal,
+    candidates: [{ id: 'cafe-ordering', framing: 'At the Café', skillFocus: ['interaction'], cefrRange: ['B1', 'B2'] }],
+  });
+
+  const deadline = Date.now() + 20_000;
+  let settled = false; let settleError = null;
+  promise.then(() => { settled = true; }, (e) => { settled = true; settleError = e; });
+  while (!settled && Date.now() < deadline) {
+    const choiceBtn = findInHud((c) => c.parentElement?.id === 'hud-choice' && c.tagName === 'BUTTON');
+    if (choiceBtn) { choiceBtn.onclick?.(); }
+    else {
+      const input = findInHud((c) => c.tagName === 'INPUT');
+      const send = findInHud((c) => c.tagName === 'BUTTON' && c.textContent === 'Send');
+      if (input && send) { input.value = 'I would like a coffee please'; send.onclick?.(); }
+    }
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  assert.ifError(settleError);
+  assert.ok(settled, 'runNextBeat did not settle within 20s');
+  await promise.catch(() => {});
+
+  // World data was folded with the briefing items (replace-by-id, newest first)
+  const data = t.world.data;
+  assert.ok(Array.isArray(data) && data.length > 0, 'world.data was not populated');
+  assert.ok(data.some((it) => it.id === 'fx:USD:EUR' && it.kind === 'fx'), 'fx item missing');
+  assert.ok(data.some((it) => it.id === 'news:example.com:0' && it.kind === 'news'), 'news item missing');
+
+  // data.updated event was emitted with the items and new count
+  const { queryEvents } = await import('../data/eventlog.js');
+  const events = await queryEvents();
+  const dataEvents = events.filter((e) => e.type === 'data.updated');
+  assert.ok(dataEvents.length > 0, 'missing data.updated event');
+  assert.ok(dataEvents[0].count >= 2, 'data.updated did not report count');
+  assert.ok(Array.isArray(dataEvents[0].items), 'data.updated did not carry items');
+
+  // mcp.tool.failed was emitted for the failed tool
+  const failEvents = events.filter((e) => e.type === 'mcp.tool.failed');
+  assert.ok(failEvents.length === 1, 'mcp.tool.failed should have been emitted once');
+  assert.equal(failEvents[0].tool, 'web.search');
+  assert.match(failEvents[0].error, /upstream down/);
+
+  // Reset provider shims for subsequent tests
+  _setProviderImplsForTests({
+    probeBackend: async () => null,
+    detectOpenAI: async () => null,
+    mock: { name: 'mock', complete: async () => '{}' },
+  });
+});
+
 test('sim: exhausted player is restricted to rest beats', async () => {
   const t = (await import('./loop.js')).__test__;
   t.newSession();
