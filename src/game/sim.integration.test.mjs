@@ -171,6 +171,14 @@ test('sim: a beat costs energy/money/time and moves the world clock', async () =
 });
 
 test('sim: briefing toolLog folds into world.data and emits data.updated', async () => {
+  // The window.LIFESPEAK_AI override above short-circuits the provider chain
+  // (director.js checks window.LIFESPEAK_AI before backend), so the
+  // backendComplete mock injected via _setProviderImplsForTests would never
+  // run. Clear the window hook so the backend path is selected — otherwise
+  // the mock provider (last resort) drives the beat and toolLog is undefined,
+  // which is exactly the regression this test catches.
+  delete globalThis.window.LIFESPEAK_AI;
+
   // Switch the mock to a backend provider that returns a toolLog envelope
   // for directNextScenario. This proves the loop wiring: toolLog →
   // briefingFromToolLog → tick(setData) → world.data → data.updated event.
